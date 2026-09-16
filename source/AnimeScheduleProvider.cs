@@ -113,6 +113,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             var matching = current
                 .Concat(next)
                 .Where(e => string.Equals(e.Route, animeInfo.Route, StringComparison.Ordinal))
+                .OrderBy(e => e.EpisodeDate)
                 .ToList();
 
             if (matching.Count == 0)
@@ -217,9 +218,8 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         var linkGroups = new List<IReadOnlyList<int>>();
         var episodeByNumber = new Dictionary<int, IEpisode>();
 
-        foreach (var entry in entries)
+        foreach (var (entry, numbers) in AnimeScheduleMapper.ResolveEpisodeOwnership(entries))
         {
-            var numbers = AnimeScheduleMapper.GetEpisodeNumbers(entry);
             if (numbers.Count > 1)
                 linkGroups.Add(numbers);
 

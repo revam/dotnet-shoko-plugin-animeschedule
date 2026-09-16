@@ -9,7 +9,7 @@ Data is provided by [AnimeSchedule.net](https://animeschedule.net/), as required
 - **Raw, sub and dub schedules** — tracks all three release kinds per anime, each as its own schedule per streaming platform.
 - **Delay-aware** — reports `delayed-air` episodes as delayed, keeping the original slot alongside the new one (or leaving the airing slotless when no new date has been announced yet).
 - **Multi-episode releases** — a timetable entry covering several episodes at once (e.g. a two-episode premiere) is submitted as one airing per episode, linked together.
-- **Streaming channels** — registers a channel for every platform AnimeSchedule.net lists a stream on (Crunchyroll, Netflix, Amazon, HIDIVE, Hulu, Funimation, Wakanim, YouTube), carrying the episode's page URL.
+- **Streaming channels** — registers a channel for every platform AnimeSchedule.net lists a stream on (Crunchyroll, Netflix, Amazon, Apple TV, Bilibili TV, Disney+, HIDIVE, Hulu, OceanVeil, YouTube and any platform added since), carrying the episode's page URL.
 - **Rate-limit aware** — reads AnimeSchedule.net's `X-RateLimit-*` response headers and backs off accordingly, rather than guessing a fixed request rate.
 - **Efficient sweeps** — the recurring sweep fetches each of the six timetable pages (raw/sub/dub × this week/next week) once per run and matches them against every series, instead of one round-trip per anime.
 
@@ -53,7 +53,8 @@ The provider does nothing (and `RefreshAsync` returns `false`) until a token is 
 - `GET /timetables/{raw|sub|dub}?year=&week=&tz=UTC` is fetched for the current and next ISO week, and matched back to the anime by `route`.
 - `raw` maps to an `Original` track (`zh` for a donghua, `ja` otherwise), `sub` to `Subtitled` `en`, and `dub` to `Dubbed` `en`.
 - One schedule is created per AniDB anime, air type and streaming platform (keyed `{airType}:{platform}`), covering episodes 1 through the anime's total episode count, marked finished once AnimeSchedule.net reports the anime as `Finished`.
-- Delays are reported as AnimeSchedule.net gives them (`delayed-air` plus `delayedFrom`/`delayedUntil`) rather than inferred, and a `subtractedEpisodeNumber` range is submitted as one airing per episode and linked together.
+- Delays are reported as AnimeSchedule.net gives them rather than inferred, and a `subtractedEpisodeNumber` range is submitted as one airing per episode and linked together.
+- `airingStatus` is a series-level state: once a series is delayed or on break, every entry it returns reads `delayed-air` and carries the same `delayedFrom`/`delayedUntil` window, historical weeks included. Only an entry slotted at or after the window's start is treated as postponed; one with no `delayedUntil` yet becomes a slotless airing.
 
 ## Building from Source
 

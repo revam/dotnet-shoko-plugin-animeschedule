@@ -1,0 +1,197 @@
+[
+  {
+    "title": "Hokuto no Ken: Kenougun Zako-tachi no Banka Part 2",
+    "route": "hokuto-no-ken-kenougun-zako-tachi-no-banka-part-2",
+    "romaji": "Hokuto no Ken: Kenougun Zako-tachi no Banka Part 2",
+    "english": "Elegy for the Henchmen: Fist of the North Star Part 2",
+    "native": "北斗の拳 拳王軍ザコたちの挽歌 第2クール",
+    "delayedFrom": "0001-01-01T00:00:00Z",
+    "delayedUntil": "0001-01-01T00:00:00Z",
+    "status": "Ongoing",
+    "episodeDate": "2026-09-14T11:05:00Z",
+    "episodeNumber": 11,
+    "episodes": 12,
+    "lengthMin": 4,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV Short",
+        "route": "tv-short"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/hokuto-no-ken-kenougun-zako-tachi-no-banka-part-2-75f7a81c1f7246071fdadb5ecaac90cc.jpg",
+    "streams": [
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLcPnuVJ3jm6A",
+        "name": "YouTube"
+      }
+    ],
+    "airingStatus": "aired"
+  },
+  {
+    "title": "Toumei na Yoru ni Kakeru Kimi to, Me ni Mienai Koi wo Shita.",
+    "route": "toumei-na-yoru-ni-kakeru-kimi-to-me-ni-mienai-koi-wo-shita",
+    "romaji": "Toumei na Yoru ni Kakeru Kimi to, Me ni Mienai Koi wo Shita.",
+    "english": "Love Unseen Beneath the Clear Night Sky",
+    "native": "透明な夜に駆ける君と、目に見えない恋をした。",
+    "delayedFrom": "0001-01-01T00:00:00Z",
+    "delayedUntil": "0001-01-01T00:00:00Z",
+    "status": "Ongoing",
+    "episodeDate": "2026-09-14T12:30:00Z",
+    "episodeNumber": 11,
+    "episodes": 12,
+    "lengthMin": 24,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV",
+        "route": "tv"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/toumei-na-yoru-ni-kakeru-kimi-to-me-ni-mienai-koi-wo-shita-03d9336a56f3c432a531d15711942198.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4vjXI0r",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "crunchyroll",
+        "url": "www.crunchyroll.com/series/GT00378087/love-unseen-beneath-the-clear-night-sky",
+        "name": "Crunchyroll"
+      },
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLTsUhR_H9p7U",
+        "name": "YouTube"
+      },
+      {
+        "platform": "bilibili",
+        "url": "www.bilibili.tv/en/media/2413250",
+        "name": "BiliBili TV"
+      }
+    ],
+    "airingStatus": "aired"
+  },
+  {
+    "title": "BLEACH: Sennen Kessen-hen - Kashin-tan",
+    "route": "bleach-sennen-kessen-hen-kashin-tan",
+    "romaji": "BLEACH: Sennen Kessen-hen - Kashin-tan",
+    "english": "BLEACH: Thousand-Year Blood War - The Calamity",
+    "native": "BLEACH 千年血戦篇-禍進譚-",
+    "delayedText": "Delayed",
+    "delayedFrom": "2026-09-14T00:00:00Z",
+    "delayedUntil": "2026-10-19T00:00:00Z",
+    "status": "Delayed",
+    "episodeDate": "2026-09-14T15:30:00Z",
+    "episodeNumber": 9,
+    "episodes": 10,
+    "lengthMin": 24,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV",
+        "route": "tv"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/bleach-sennen-kessen-hen-kashin-tan-f6f55ab4137d9ca1e73b7f8d74341751.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4pD39X7",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "hulu",
+        "url": "www.hulu.com/series/bleach-thousand-year-blood-war-02a3c8c0-4f1d-4610-bbb4-5b8e9468d7b1",
+        "name": "Hulu"
+      },
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLYDN8muP8huc",
+        "name": "YouTube"
+      },
+      {
+        "platform": "disney",
+        "url": "www.disneyplus.com/series/bleach-thousand-year-blood-war/4Afet1Q421gy",
+        "name": "Disney+"
+      }
+    ],
+    "airingStatus": "delayed-air"
+  },
+  {
+    "title": "Ganso! Bandori-chan",
+    "route": "ganso-bandori-chan",
+    "romaji": "Ganso! Bandori-chan",
+    "english": "GANSO! BanG Dream Chan",
+    "native": "元祖！バンドリちゃん",
+    "delayedFrom": "2026-01-01T00:00:00Z",
+    "delayedUntil": "2026-01-08T00:00:00Z",
+    "status": "Ongoing",
+    "episodeDate": "2026-09-17T13:01:00Z",
+    "episodeNumber": 50,
+    "episodes": 52,
+    "lengthMin": 1,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV Short",
+        "route": "tv-short"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/ganso-bandori-chan-6251cd7db2.jpg",
+    "airingStatus": "unaired"
+  },
+  {
+    "title": "Seihantai na Kimi to Boku 2nd Season",
+    "route": "seihantai-na-kimi-to-boku-2nd-season",
+    "romaji": "Seihantai na Kimi to Boku 2nd Season",
+    "english": "You and I Are Polar Opposites 2nd Season",
+    "native": "正反対な君と僕 第2期",
+    "delayedText": "Delayed",
+    "delayedFrom": "2026-09-20T00:00:00Z",
+    "delayedUntil": "2026-09-27T00:00:00Z",
+    "status": "Delayed",
+    "episodeDate": "2026-09-20T08:30:00Z",
+    "episodeNumber": 12,
+    "episodes": 13,
+    "lengthMin": 24,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV",
+        "route": "tv"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/seihantai-na-kimi-to-boku-2nd-season-e132cb438e9a0b4139a277787bfc63fe.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4eUISXR",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "crunchyroll",
+        "url": "www.crunchyroll.com/series/GT00365624/you-and-i-are-polar-opposites",
+        "name": "Crunchyroll"
+      },
+      {
+        "platform": "amazon",
+        "url": "amzn.to/4bN8k0Y",
+        "name": "Amazon"
+      },
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLHr3g0ivIWN4",
+        "name": "YouTube"
+      }
+    ],
+    "airingStatus": "delayed-air"
+  }
+]

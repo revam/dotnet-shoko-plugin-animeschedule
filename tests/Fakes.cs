@@ -117,3 +117,45 @@ internal sealed class RecordingLogger<T> : ILogger<T>
     public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         => Entries.Add(logLevel);
 }
+
+/// <summary>
+/// Reads the captured AnimeSchedule.net responses in <c>tests/Fixtures</c>.
+/// Every fixture is a verbatim (if trimmed to a handful of entries) capture
+/// of a real response, so a model that only matches the documentation fails
+/// here the same way it fails against the live API.
+/// </summary>
+internal static class Fixture
+{
+    public static string Read(string fileName)
+        => System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory, "Fixtures", fileName));
+}
+
+/// <summary>
+/// An <see cref="System.Net.Http.HttpMessageHandler"/> that replays a fixed
+/// queue of responses, recording the URIs it was asked for. Used to drive
+/// the API client over captured responses without touching the network.
+/// </summary>
+internal sealed class StubHttpMessageHandler : System.Net.Http.HttpMessageHandler
+{
+    private readonly Queue<(System.Net.HttpStatusCode StatusCode, string Body, string ContentType)> _responses = new();
+
+    public List<string> Requests { get; } = [];
+
+    public StubHttpMessageHandler Enqueue(System.Net.HttpStatusCode statusCode, string body, string contentType = "application/json")
+    {
+        _responses.Enqueue((statusCode, body, contentType));
+        return this;
+    }
+
+    protected override System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+    {
+        Requests.Add(request.RequestUri?.ToString() ?? "");
+        if (!_responses.TryDequeue(out var response))
+            throw new InvalidOperationException($"No stubbed response left for {request.RequestUri}.");
+
+        return System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(response.StatusCode)
+        {
+            Content = new System.Net.Http.StringContent(response.Body, System.Text.Encoding.UTF8, response.ContentType),
+        });
+    }
+}

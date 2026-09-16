@@ -26,22 +26,37 @@ public static class AnimeScheduleMapper
     ];
 
     /// <summary>
-    /// One entry per streaming platform AnimeSchedule.net tracks: its stable
-    /// key (used in a schedule's identity), its display name (used to
-    /// register the channel), and how to read its URL off a
-    /// <see cref="AnimeScheduleStreams"/> instance.
+    /// Canonical display names for the streaming platforms AnimeSchedule.net
+    /// is known to report, keyed by the stable <c>platform</c> key it sends.
     /// </summary>
-    private static readonly IReadOnlyList<(string Key, string DisplayName, Func<AnimeScheduleStreams, string?> Select)> PlatformSelectors =
-    [
-        ("crunchyroll", "Crunchyroll", s => s.Crunchyroll),
-        ("funimation", "Funimation", s => s.Funimation),
-        ("wakanim", "Wakanim", s => s.Wakanim),
-        ("amazon", "Amazon", s => s.Amazon),
-        ("hidive", "HIDIVE", s => s.Hidive),
-        ("hulu", "Hulu", s => s.Hulu),
-        ("youtube", "YouTube", s => s.Youtube),
-        ("netflix", "Netflix", s => s.Netflix),
-    ];
+    /// <remarks>
+    /// The API's own <c>name</c> is not stable enough to register a channel
+    /// by — the same platform arrives as both <c>BiliBili TV</c> and
+    /// <c>Bilibili TV</c>, and air type-specific entries append <c>(Sub)</c>
+    /// or <c>(Dub)</c> — so a known platform is always named from this table
+    /// and only an unknown one falls back to the API's spelling.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> KnownPlatformNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["amazon"] = "Amazon",
+        ["apple"] = "Apple TV",
+        ["bilibili"] = "Bilibili TV",
+        ["crunchyroll"] = "Crunchyroll",
+        ["disney"] = "Disney+",
+        ["funimation"] = "Funimation",
+        ["hidive"] = "HIDIVE",
+        ["hulu"] = "Hulu",
+        ["netflix"] = "Netflix",
+        ["oceanveil"] = "OceanVeil",
+        ["wakanim"] = "Wakanim",
+        ["youtube"] = "YouTube",
+    };
+
+    /// <summary>
+    /// The air type suffixes AnimeSchedule.net appends to a platform's
+    /// display name when it tracks that platform per air type.
+    /// </summary>
+    private static readonly string[] AirTypeNameSuffixes = [" (Sub)", " (Dub)", " (Raw)"];
 
     /// <summary>
     /// One resolved streaming platform for a schedule: its key (for the
@@ -101,35 +116,78 @@ public static class AnimeScheduleMapper
         => $"{airType.ToString().ToLowerInvariant()}:{platformKey ?? "none"}";
 
     /// <summary>
+    /// Turns a stream URL as AnimeSchedule.net sends it into an absolute one.
+    /// Every URL the API returns is scheme-less (<c>www.youtube.com/...</c>,
+    /// <c>amzn.to/...</c>), which no client would follow as-is, so a missing
+    /// scheme is filled in as <c>https</c>.
+    /// </summary>
+    /// <returns>The absolute URL, or <c>null</c> when there is no URL.</returns>
+    public static string? NormalizeStreamUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return null;
+
+        var trimmed = url.Trim();
+        if (trimmed.StartsWith("//", StringComparison.Ordinal))
+            return $"https:{trimmed}";
+
+        return trimmed.Contains("://", StringComparison.Ordinal) ? trimmed : $"https://{trimmed}";
+    }
+
+    /// <summary>
+    /// Resolves the display name to register a platform's channel under:
+    /// this plugin's own spelling for a platform it knows, and otherwise the
+    /// API's name with any air type suffix stripped, so a platform added to
+    /// AnimeSchedule.net after this table was written still gets a channel.
+    /// </summary>
+    public static string GetPlatformDisplayName(string platformKey, string? apiName)
+    {
+        if (KnownPlatformNames.TryGetValue(platformKey, out var known))
+            return known;
+
+        var name = apiName?.Trim() ?? "";
+        foreach (var suffix in AirTypeNameSuffixes)
+            if (name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                name = name[..^suffix.Length].TrimEnd();
+                break;
+            }
+
+        return string.IsNullOrEmpty(name) ? platformKey : name;
+    }
+
+    /// <summary>
     /// Resolves every streaming platform referenced by any of the given
     /// entries (typically the current and next week's entries for one air
     /// type), keeping the most recently seen URL per platform. Entries are
     /// expected to be given in chronological order.
     /// </summary>
     /// <returns>
-    /// The resolved platforms, or a single <see cref="NoPlatform"/> entry
-    /// when none of the entries name a stream.
+    /// The resolved platforms ordered by key, or a single
+    /// <see cref="NoPlatform"/> entry when none of the entries name a stream.
     /// </returns>
     public static IReadOnlyList<PlatformLink> GetPlatforms(IEnumerable<AnimeScheduleTimetableEntry> entries)
     {
-        var materialized = entries as IReadOnlyList<AnimeScheduleTimetableEntry> ?? entries.ToList();
-        var result = new List<PlatformLink>();
-
-        foreach (var (key, displayName, select) in PlatformSelectors)
-        {
-            string? url = null;
-            foreach (var entry in materialized)
+        var byKey = new Dictionary<string, PlatformLink>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+            foreach (var stream in entry.Streams)
             {
-                var candidate = select(entry.Streams);
-                if (!string.IsNullOrWhiteSpace(candidate))
-                    url = candidate;
+                if (string.IsNullOrWhiteSpace(stream.Platform))
+                    continue;
+
+                if (NormalizeStreamUrl(stream.Url) is not { } url)
+                    continue;
+
+                var key = stream.Platform.Trim().ToLowerInvariant();
+                byKey[key] = new PlatformLink(key, GetPlatformDisplayName(key, stream.Name), url);
             }
 
-            if (url is not null)
-                result.Add(new PlatformLink(key, displayName, url));
-        }
+        if (byKey.Count == 0)
+            return [NoPlatform];
 
-        return result.Count > 0 ? result : [NoPlatform];
+        // Ordered so the schedules for one air type are always created in the
+        // same order, whatever order the API listed the platforms in.
+        return byKey.Values.OrderBy(platform => platform.Key, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>
@@ -149,10 +207,25 @@ public static class AnimeScheduleMapper
     }
 
     /// <summary>
-    /// Whether the entry's immediate timetable status is <c>delayed-air</c>.
+    /// Whether this entry's own slot was postponed.
     /// </summary>
+    /// <remarks>
+    /// <c>airingStatus</c> is a series-level state: once a series is delayed
+    /// or on break, <em>every</em> entry AnimeSchedule.net returns for it
+    /// reads <c>delayed-air</c>, including the weeks that aired on time long
+    /// before the delay began, and every one of them carries the same
+    /// <c>delayedFrom</c>/<c>delayedUntil</c> window. An entry slotted before
+    /// that window opened aired on time whatever the series-level status
+    /// says, so the window's start is what narrows the series' state down to
+    /// the episodes it actually applies to.
+    /// </remarks>
     public static bool IsDelayed(AnimeScheduleTimetableEntry entry)
-        => string.Equals(entry.AiringStatus, "delayed-air", StringComparison.OrdinalIgnoreCase);
+    {
+        if (!string.Equals(entry.AiringStatus, "delayed-air", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return entry.DelayedFrom is not { } delayedFrom || entry.EpisodeDate >= delayedFrom;
+    }
 
     /// <summary>
     /// Resolves an entry's airing time, original time and delay flag. Since
@@ -163,17 +236,74 @@ public static class AnimeScheduleMapper
     /// </summary>
     public static (DateTime? AiredAt, DateTime? OriginalAiredAt, bool IsDelayed) ResolveTiming(AnimeScheduleTimetableEntry entry)
     {
+        var episodeDate = DateTime.SpecifyKind(entry.EpisodeDate.UtcDateTime, DateTimeKind.Utc);
         if (!IsDelayed(entry))
-            return (DateTime.SpecifyKind(entry.EpisodeDate.UtcDateTime, DateTimeKind.Utc), null, false);
+            return (episodeDate, null, false);
 
-        var originalAiredAt = entry.DelayedFrom.HasValue
-            ? DateTime.SpecifyKind(entry.DelayedFrom.Value.UtcDateTime, DateTimeKind.Utc)
-            : DateTime.SpecifyKind(entry.EpisodeDate.UtcDateTime, DateTimeKind.Utc);
-        var airedAt = entry.DelayedUntil.HasValue
-            ? DateTime.SpecifyKind(entry.DelayedUntil.Value.UtcDateTime, DateTimeKind.Utc)
-            : (DateTime?)null;
+        var originalAiredAt = entry.DelayedFrom is { } delayedFrom
+            ? DateTime.SpecifyKind(delayedFrom.UtcDateTime, DateTimeKind.Utc)
+            : episodeDate;
 
-        return (airedAt, originalAiredAt, true);
+        return (ResolveDelayedSlot(entry, originalAiredAt), originalAiredAt, true);
+    }
+
+    /// <summary>
+    /// Resolves when a delayed entry is expected back, or <c>null</c> when
+    /// the postponement is still indefinite.
+    /// </summary>
+    private static DateTime? ResolveDelayedSlot(AnimeScheduleTimetableEntry entry, DateTime originalAiredAt)
+    {
+        if (entry.DelayedUntil is not { } delayedUntil)
+            return null;
+
+        var resumesAt = DateTime.SpecifyKind(delayedUntil.UtcDateTime, DateTimeKind.Utc);
+        if (resumesAt <= originalAiredAt)
+            return null;
+
+        // The delay window is recorded at day granularity — both ends are
+        // always midnight UTC — while the entry carries the slot's real time
+        // of day. Putting the two back together reproduces exactly the time
+        // the API itself reports for the episode once the week it resumes in
+        // is queried.
+        return resumesAt.Date + entry.EpisodeDate.UtcDateTime.TimeOfDay;
+    }
+
+    /// <summary>
+    /// Decides which entry owns each episode number across a set of entries.
+    /// </summary>
+    /// <remarks>
+    /// The timetable is a projection, not a log: a stalled series' next
+    /// episode is reported again in every week it is queried for, at that
+    /// week's slot, so fetching the current and the next week can hand back
+    /// the same episode number twice. The later projection is the current
+    /// one, and submitting both would be rejected outright as two airings
+    /// sharing a key.
+    /// </remarks>
+    /// <returns>
+    /// Each entry that still owns at least one episode number, in
+    /// chronological order, paired with the numbers it owns.
+    /// </returns>
+    public static IReadOnlyList<(AnimeScheduleTimetableEntry Entry, IReadOnlyList<int> EpisodeNumbers)> ResolveEpisodeOwnership(
+        IEnumerable<AnimeScheduleTimetableEntry> entries
+    )
+    {
+        var ordered = entries.OrderBy(entry => entry.EpisodeDate).ToList();
+        var ownerByNumber = new Dictionary<int, AnimeScheduleTimetableEntry>();
+        foreach (var entry in ordered)
+            foreach (var number in GetEpisodeNumbers(entry))
+                ownerByNumber[number] = entry;
+
+        var result = new List<(AnimeScheduleTimetableEntry, IReadOnlyList<int>)>();
+        foreach (var entry in ordered)
+        {
+            var owned = GetEpisodeNumbers(entry)
+                .Where(number => ReferenceEquals(ownerByNumber.GetValueOrDefault(number), entry))
+                .ToList();
+            if (owned.Count > 0)
+                result.Add((entry, owned));
+        }
+
+        return result;
     }
 
     /// <summary>

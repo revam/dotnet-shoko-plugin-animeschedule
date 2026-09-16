@@ -86,6 +86,17 @@ public sealed class AnimeScheduleApiClient
             _ => throw new ArgumentOutOfRangeException(nameof(airType), airType, null),
         };
 
+        // AnimeSchedule.net does not reject an out-of-range week: 2026 week
+        // 54 answers with week 53's payload byte for byte, so a caller that
+        // walked off the end of a year would ingest the same week twice under
+        // two numbers. ISO 8601 never numbers a week past 53, so anything
+        // else is a bug on this side and is dropped instead of fetched.
+        if (week is < 1 or > 53)
+        {
+            _logger.LogDebug("AnimeSchedule.net timetable request skipped: week {Week} of {Year} is not an ISO 8601 week.", week, year);
+            return [];
+        }
+
         var entries = await GetAsync<List<AnimeScheduleTimetableEntry>>(
             $"timetables/{segment}?year={year}&week={week}&tz=UTC",
             cancellationToken
@@ -146,7 +157,17 @@ public sealed class AnimeScheduleApiClient
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("AnimeSchedule.net request to {RequestUri} failed with {StatusCode}.", requestUri, response.StatusCode);
+                    // A 404 is a routine answer rather than a failure: an
+                    // anime AnimeSchedule.net does not know, and a week with
+                    // no timetable at all, both come back as one (with a
+                    // plain-text body, not JSON). Sweeping either would warn
+                    // once per series or per week, so only a status that
+                    // really is unexpected is worth a warning.
+                    if (response.StatusCode == HttpStatusCode.NotFound)
+                        _logger.LogDebug("AnimeSchedule.net has no data for {RequestUri}.", requestUri);
+                    else
+                        _logger.LogWarning("AnimeSchedule.net request to {RequestUri} failed with {StatusCode}.", requestUri, response.StatusCode);
+
                     return null;
                 }
 

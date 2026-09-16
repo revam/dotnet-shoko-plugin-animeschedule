@@ -151,40 +151,53 @@ public sealed class AnimeScheduleTimetableEntry
 
     /// <summary>
     /// The streaming platforms this episode is (or will be) available on.
+    /// Absent from the response entirely when there are none, so an entry
+    /// that names no stream deserializes to an empty list rather than
+    /// <c>null</c>.
     /// </summary>
-    public AnimeScheduleStreams Streams { get; set; } = new();
+    public List<AnimeScheduleStream> Streams
+    {
+        get => _streams;
+        set => _streams = value ?? [];
+    }
+
+    private List<AnimeScheduleStream> _streams = [];
 }
 
 /// <summary>
-/// The fixed set of streaming platforms AnimeSchedule.net tracks. Each
-/// property is the episode's page on that platform, or <c>null</c> when it is
-/// not available there.
+/// One streaming platform an anime or episode is available on.
 /// </summary>
-public sealed class AnimeScheduleStreams
+/// <remarks>
+/// AnimeSchedule.net returns these as an array, not as an object with a
+/// property per platform, and the set of platforms is open-ended: alongside
+/// the ones its documentation names it also reports <c>apple</c>,
+/// <c>bilibili</c>, <c>disney</c> and <c>oceanveil</c>.
+/// </remarks>
+public sealed class AnimeScheduleStream
 {
-    /// <summary>The episode's page on Crunchyroll, if any.</summary>
-    public string? Crunchyroll { get; set; }
+    /// <summary>
+    /// The platform's stable lower-case key, e.g. <c>crunchyroll</c> or
+    /// <c>youtube</c>. Unlike <see cref="Name"/> this is spelled the same way
+    /// on every entry, so it is what a schedule is keyed and channelled by.
+    /// </summary>
+    public string Platform { get; set; } = "";
 
-    /// <summary>The episode's page on Funimation, if any.</summary>
-    public string? Funimation { get; set; }
+    /// <summary>
+    /// The link to the anime or episode on that platform. The API sends this
+    /// without a scheme (<c>www.youtube.com/...</c>), so it has to be
+    /// absolutised before being handed on as a URL; see
+    /// <see cref="Shoko.Plugin.AnimeSchedule.AnimeScheduleMapper.NormalizeStreamUrl"/>.
+    /// </summary>
+    public string Url { get; set; } = "";
 
-    /// <summary>The episode's page on Wakanim, if any.</summary>
-    public string? Wakanim { get; set; }
-
-    /// <summary>The episode's page on Amazon (Prime Video), if any.</summary>
-    public string? Amazon { get; set; }
-
-    /// <summary>The episode's page on HIDIVE, if any.</summary>
-    public string? Hidive { get; set; }
-
-    /// <summary>The episode's page on Hulu, if any.</summary>
-    public string? Hulu { get; set; }
-
-    /// <summary>The episode's page on YouTube, if any.</summary>
-    public string? Youtube { get; set; }
-
-    /// <summary>The episode's page on Netflix, if any.</summary>
-    public string? Netflix { get; set; }
+    /// <summary>
+    /// The platform's display name as the API spells it on this particular
+    /// entry. Not stable: the same platform is variously named
+    /// <c>BiliBili TV</c> and <c>Bilibili TV</c>, and an air type-specific
+    /// entry carries a <c>(Sub)</c> or <c>(Dub)</c> suffix, so this is only a
+    /// fallback for a platform key the plugin does not know yet.
+    /// </summary>
+    public string Name { get; set; } = "";
 }
 
 /// <summary>

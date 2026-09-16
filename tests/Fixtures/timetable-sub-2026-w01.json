@@ -1,0 +1,44 @@
+[
+  {
+    "title": "Kaguya-sama wa Kokurasetai: Otona e no Kaidan",
+    "route": "kaguya-sama-wa-kokurasetai-otona-e-no-kaidan",
+    "romaji": "Kaguya-sama wa Kokurasetai: Otona e no Kaidan",
+    "english": "Kaguya-sama: Love Is War -Stairway to Adulthood-",
+    "native": "かぐや様は告らせたい 大人への階段",
+    "delayedFrom": "0001-01-01T00:00:00Z",
+    "delayedUntil": "0001-01-01T00:00:00Z",
+    "status": "Finished",
+    "episodeDate": "2025-12-31T15:00:00Z",
+    "episodeNumber": 2,
+    "subtractedEpisodeNumber": 1,
+    "episodes": 2,
+    "lengthMin": 25,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "Special",
+        "route": "special"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/kaguya-sama-wa-kokurasetai-otona-e-no-kaidan-9956f5d43e.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4pmWMW2",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "crunchyroll",
+        "url": "www.crunchyroll.com/watch/GWDU78X9N/chika-fujiwara-wants-to-surprise--miyuki-shirogane-wants-to-talk--kaguya-shinomiyas-impossible-task",
+        "name": "Crunchyroll"
+      },
+      {
+        "platform": "amazon",
+        "url": "amzn.to/4q5ZqkM",
+        "name": "Amazon"
+      }
+    ],
+    "airingStatus": "aired"
+  }
+]

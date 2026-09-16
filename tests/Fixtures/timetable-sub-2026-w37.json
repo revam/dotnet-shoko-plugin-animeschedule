@@ -1,0 +1,94 @@
+[
+  {
+    "title": "BLEACH: Sennen Kessen-hen - Kashin-tan",
+    "route": "bleach-sennen-kessen-hen-kashin-tan",
+    "romaji": "BLEACH: Sennen Kessen-hen - Kashin-tan",
+    "english": "BLEACH: Thousand-Year Blood War - The Calamity",
+    "native": "BLEACH 千年血戦篇-禍進譚-",
+    "delayedFrom": "2026-09-14T00:00:00Z",
+    "delayedUntil": "2026-10-19T00:00:00Z",
+    "status": "Delayed",
+    "episodeDate": "2026-09-12T14:30:00Z",
+    "episodeNumber": 8,
+    "episodes": 10,
+    "lengthMin": 24,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV",
+        "route": "tv"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/bleach-sennen-kessen-hen-kashin-tan-f6f55ab4137d9ca1e73b7f8d74341751.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4pD39X7",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "hulu",
+        "url": "www.hulu.com/series/bleach-thousand-year-blood-war-02a3c8c0-4f1d-4610-bbb4-5b8e9468d7b1",
+        "name": "Hulu"
+      },
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLYDN8muP8huc",
+        "name": "YouTube"
+      },
+      {
+        "platform": "disney",
+        "url": "www.disneyplus.com/series/bleach-thousand-year-blood-war/4Afet1Q421gy",
+        "name": "Disney+"
+      }
+    ],
+    "airingStatus": "delayed-air"
+  },
+  {
+    "title": "Seihantai na Kimi to Boku 2nd Season",
+    "route": "seihantai-na-kimi-to-boku-2nd-season",
+    "romaji": "Seihantai na Kimi to Boku 2nd Season",
+    "english": "You and I Are Polar Opposites 2nd Season",
+    "native": "正反対な君と僕 第2期",
+    "delayedFrom": "2026-09-20T00:00:00Z",
+    "delayedUntil": "2026-09-27T00:00:00Z",
+    "status": "Delayed",
+    "episodeDate": "2026-09-13T08:30:00Z",
+    "episodeNumber": 11,
+    "episodes": 13,
+    "lengthMin": 24,
+    "donghua": false,
+    "airType": "sub",
+    "mediaTypes": [
+      {
+        "name": "TV",
+        "route": "tv"
+      }
+    ],
+    "imageVersionRoute": "anime/jpg/default/seihantai-na-kimi-to-boku-2nd-season-e132cb438e9a0b4139a277787bfc63fe.jpg",
+    "streams": [
+      {
+        "platform": "apple",
+        "url": "apple.co/4eUISXR",
+        "name": "Apple TV"
+      },
+      {
+        "platform": "crunchyroll",
+        "url": "www.crunchyroll.com/series/GT00365624/you-and-i-are-polar-opposites",
+        "name": "Crunchyroll"
+      },
+      {
+        "platform": "amazon",
+        "url": "amzn.to/4bN8k0Y",
+        "name": "Amazon"
+      },
+      {
+        "platform": "youtube",
+        "url": "www.youtube.com/playlist?list=PLHr3g0ivIWN4",
+        "name": "YouTube"
+      }
+    ],
+    "airingStatus": "delayed-air"
+  }
+]

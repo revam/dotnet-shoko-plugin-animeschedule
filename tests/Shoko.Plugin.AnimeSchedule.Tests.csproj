@@ -22,15 +22,23 @@
     The plugin's own reference excludes runtime assets, because the host
     supplies the abstractions in production. The test host is not the
     host, so it has to bring its own copy or nothing that touches a
-    Shoko type will load. Referenced by project path for the same reason
-    as the plugin itself: the abstractions are still being developed
-    alongside this plugin.
+    Shoko type will load. Same package and version as the plugin, so the
+    tests run against exactly the contract it was built for.
   -->
   <ItemGroup>
-    <ProjectReference Include="../../Shoko/Shoko.Abstractions/Shoko.Abstractions.csproj" />
+    <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.89" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\source\Shoko.Plugin.AnimeSchedule.csproj" />
+  </ItemGroup>
+
+  <!--
+    Fixtures are verbatim (if trimmed) captures of real AnimeSchedule.net
+    responses, so a model written from the documentation cannot pass a test
+    that the live API would fail.
+  -->
+  <ItemGroup>
+    <Content Include="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

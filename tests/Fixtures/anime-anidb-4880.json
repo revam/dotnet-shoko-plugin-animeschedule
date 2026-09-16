@@ -1,0 +1,177 @@
+{
+  "page": 1,
+  "totalAmount": 1,
+  "anime": [
+    {
+      "id": "Vr3M",
+      "title": "Naruto: Shippuuden",
+      "route": "naruto-shippuuden",
+      "premier": "2007-02-15T00:00:00Z",
+      "subPremier": "0001-01-01T00:00:00Z",
+      "dubPremier": "0001-01-01T00:00:00Z",
+      "month": "February",
+      "year": 2007,
+      "season": {
+        "title": "Winter 2007",
+        "year": "2007",
+        "season": "Winter",
+        "route": "winter-2007"
+      },
+      "episodeOverride": {
+        "overrideDate": "0001-01-01T00:00:00Z",
+        "overrideEpisode": 0,
+        "episodesAired": 0
+      },
+      "subEpisodeOverride": {
+        "overrideDate": "0001-01-01T00:00:00Z",
+        "overrideEpisode": 0,
+        "episodesAired": 0
+      },
+      "dubEpisodeOverride": {
+        "overrideDate": "0001-01-01T00:00:00Z",
+        "overrideEpisode": 0,
+        "episodesAired": 0
+      },
+      "delayedFrom": "0001-01-01T00:00:00Z",
+      "delayedUntil": "0001-01-01T00:00:00Z",
+      "subDelayedFrom": "0001-01-01T00:00:00Z",
+      "subDelayedUntil": "0001-01-01T00:00:00Z",
+      "dubDelayedFrom": "0001-01-01T00:00:00Z",
+      "dubDelayedUntil": "0001-01-01T00:00:00Z",
+      "jpnTime": "0002-01-01T10:30:00Z",
+      "subTime": "2023-03-31T10:31:00Z",
+      "dubTime": "2023-03-31T10:31:00Z",
+      "description": "Sequel to <span class=\"italics\">Naruto</span>.<br><br>It has been two and a half years since Naruto Uzumaki left Konohagakure, the Hidden Leaf Village, for intense training following events which fueled his desire to be stronger. Now Akatsuki, the mysterious organization of elite rogue ninja, is closing in on their grand plan which may threaten the safety of the entire shinobi world.<br><br>Although Naruto is older and sinister events loom on the horizon, he has changed little in personality—still rambunctious and childish—though he is now far more confident and possesses an even greater determination to protect his friends and home. Come whatever may, Naruto will carry on with the fight for what is important to him, even at the expense of his own body, in the continuation of the saga about the boy who wishes to become Hokage.<br><br>(Source: MAL Rewrite)",
+      "genres": [
+        {
+          "name": "Action",
+          "route": "action"
+        },
+        {
+          "name": "Adventure",
+          "route": "adventure"
+        },
+        {
+          "name": "Comedy",
+          "route": "comedy"
+        },
+        {
+          "name": "Martial Arts",
+          "route": "martial-arts"
+        },
+        {
+          "name": "Shounen",
+          "route": "shounen"
+        },
+        {
+          "name": "Superpower",
+          "route": "superpower"
+        }
+      ],
+      "studios": [
+        {
+          "name": "Studio Pierrot",
+          "route": "studio-pierrot"
+        }
+      ],
+      "sources": [
+        {
+          "name": "Manga",
+          "route": "manga"
+        }
+      ],
+      "mediaTypes": [
+        {
+          "name": "TV",
+          "route": "tv"
+        }
+      ],
+      "episodes": 500,
+      "lengthMin": 23,
+      "status": "Finished",
+      "createdAt": "2024-07-19T10:23:54.877Z",
+      "updatedAt": "2026-09-16T00:01:18.176Z",
+      "imageVersionRoute": "anime/jpg/default/naruto-shippuuden-944f65f35b.jpg",
+      "stats": {
+        "averageScore": 82.8429183959961,
+        "ratingCount": 498,
+        "trackedCount": 1353,
+        "droppedCount": 73,
+        "trackedRating": 258,
+        "colorLightMode": "326E3A",
+        "colorDarkMode": "50B25D"
+      },
+      "names": {
+        "native": "ナルト- 疾風伝",
+        "synonyms": [
+          "Naruto Hurricane Chronicles",
+          "Naruto Shippuuden",
+          "נארוטו שיפודן",
+          "Naruto Shippuden"
+        ]
+      },
+      "relations": {
+        "sequels": [
+          "boruto-naruto-next-generations",
+          "boruto-naruto-the-movie-naruto-ga-hokage-ni-natta-hi"
+        ],
+        "prequels": [
+          "naruto"
+        ],
+        "other": [
+          "naruto-shippuuden-sunny-side-battle",
+          "naruto-shippuuden-shippu-konoha-gakuen-den",
+          "road-of-naruto",
+          "newsong",
+          "naruto-ut",
+          "naruto-sd-rock-lee-no-seishun-full-power-ninden"
+        ],
+        "sideStories": [
+          "naruto-shippuuden-movie-2-kizuna",
+          "naruto-shippuuden-movie-3-hi-no-ishi-wo-tsugu-mono",
+          "naruto-shippuuden-movie-4-the-lost-tower",
+          "naruto-shippuuden-movie-5-blood-prison",
+          "naruto-shippuuden-movie-1",
+          "naruto-shippuuden-movie-6-road-to-ninja",
+          "the-last-naruto-the-movie",
+          "naruto-honoo-no-chuunin-shiken-naruto-vs-konohamaru"
+        ]
+      },
+      "websites": {
+        "official": "www.viz.com/naruto",
+        "mal": "myanimelist.net/anime/1735/Naruto__Shippuuden",
+        "aniList": "anilist.co/anime/1735/Naruto-Shippuuden/",
+        "kitsu": "kitsu.io/anime/naruto-shippuden",
+        "animePlanet": "www.anime-planet.com/anime/naruto-shippuden",
+        "anidb": "anidb.net/anime/4880",
+        "streams": [
+          {
+            "platform": "apple",
+            "url": "apple.co/4hwRC6x",
+            "name": "Apple TV"
+          },
+          {
+            "platform": "crunchyroll",
+            "url": "www.crunchyroll.com/naruto-shippuden",
+            "name": "Crunchyroll"
+          },
+          {
+            "platform": "hulu",
+            "url": "www.hulu.com/series/naruto-shippuden-c6321cb1-1879-4d7f-9e2f-8d7d4fc55544",
+            "name": "Hulu"
+          },
+          {
+            "platform": "netflix",
+            "url": "www.netflix.com/title/80000603",
+            "name": "Netflix"
+          },
+          {
+            "platform": "bilibili",
+            "url": "www.bilibili.tv/en/media/1005195",
+            "name": "Bilibili TV"
+          }
+        ]
+      }
+    }
+  ]
+}
