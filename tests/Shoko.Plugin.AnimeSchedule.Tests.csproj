@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <!--
+    The plugin's own reference excludes runtime assets, because the host
+    supplies the abstractions in production. The test host is not the
+    host, so it has to bring its own copy or nothing that touches a
+    Shoko type will load. Referenced by project path for the same reason
+    as the plugin itself: the abstractions are still being developed
+    alongside this plugin.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../Shoko/Shoko.Abstractions/Shoko.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\source\Shoko.Plugin.AnimeSchedule.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+{
+  "id": "a92b3752-688a-408f-a03a-bad24718449a",
+  "name": "AnimeSchedule.net",
+  "overview": "Pulls airing schedules, delays and stream links from AnimeSchedule.net for the anime in your library. Requires your own AnimeSchedule.net application token.",
+  "authors": "revam",
+  "repository_url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule",
+  "homepage_url": null,
+  "tags": [
+    "airing",
+    "schedule",
+    "animeschedule",
+    "calendar",
+    "streaming"
+  ],
+  "thumbnail": null,
+  "releases": []
+}

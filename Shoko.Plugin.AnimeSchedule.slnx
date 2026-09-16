@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/source/">
+    <Project Path="source/Shoko.Plugin.AnimeSchedule.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Shoko.Plugin.AnimeSchedule.Tests.csproj" />
+  </Folder>
+</Solution>
