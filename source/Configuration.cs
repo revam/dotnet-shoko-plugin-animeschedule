@@ -20,9 +20,9 @@ public class Configuration : IAiringScheduleProviderConfiguration, INewtonsoftJs
 {
     /// <summary>
     /// Your own AnimeSchedule.net application token, used as a Bearer token
-    /// on every request. Required; the provider refuses to run without one.
+    /// on every request. The provider stays inactive, reporting nothing,
+    /// until a token is set.
     /// </summary>
-    [Required]
     [DataType(DataType.Password)]
     [Display(Name = "App Token", Description = "Your personal AnimeSchedule.net application token. Register an app at animeschedule.net/api/v3/documentation/apps to get one.")]
     public string? AppToken { get; set; }

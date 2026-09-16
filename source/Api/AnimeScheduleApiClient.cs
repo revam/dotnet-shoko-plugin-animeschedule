@@ -20,6 +20,11 @@ public sealed class AnimeScheduleApiClient
 {
     private static readonly Uri BaseUri = new("https://animeschedule.net/api/v3/");
 
+    // 0 = never logged, 1 = already warned once. Shared across instances so
+    // a token that stays unset for the life of the process only warns once,
+    // regardless of how many typed HttpClient instances are handed out.
+    private static int _hasWarnedMissingToken;
+
     private readonly HttpClient _http;
     private readonly ILogger<AnimeScheduleApiClient> _logger;
     private readonly AnimeScheduleRateLimiter _rateLimiter;
@@ -92,6 +97,20 @@ public sealed class AnimeScheduleApiClient
     private async Task<T?> GetAsync<T>(string requestUri, CancellationToken cancellationToken) where T : class
     {
         var token = _configurationProvider.Load().AppToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            // Callers (AnimeScheduleProvider) already gate on the token
+            // before reaching here, but fail fast and quietly instead of
+            // sending an unauthenticated request AnimeSchedule.net would
+            // just reject. Warn once per process, then drop to Debug so a
+            // token left unset does not spam the log on every refresh.
+            if (Interlocked.Exchange(ref _hasWarnedMissingToken, 1) == 0)
+                _logger.LogWarning("AnimeSchedule.net request to {RequestUri} skipped: no app token configured.", requestUri);
+            else
+                _logger.LogDebug("AnimeSchedule.net request to {RequestUri} skipped: no app token configured.", requestUri);
+
+            return null;
+        }
 
         // One retry: a 429 means our own header-driven throttling fell
         // behind the server's own accounting (e.g. another app on the same
@@ -102,8 +121,7 @@ public sealed class AnimeScheduleApiClient
             await _rateLimiter.WaitAsync(cancellationToken).ConfigureAwait(false);
 
             using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            if (!string.IsNullOrWhiteSpace(token))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             HttpResponseMessage response;
             try
