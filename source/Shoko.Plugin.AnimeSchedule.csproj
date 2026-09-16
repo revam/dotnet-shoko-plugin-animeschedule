@@ -23,8 +23,8 @@
         ships.
     -->
     <ItemGroup>
-        <ProjectReference Include="../../Shoko/Shoko.Abstractions/Shoko.Abstractions.csproj" ExcludeAssets="runtime" />
-        <ProjectReference Include="../../Shoko/Shoko.QueueProcessor/Shoko.QueueProcessor.csproj" ExcludeAssets="runtime" />
+        <ProjectReference Include="../../Shoko/Shoko.Abstractions/Shoko.Abstractions.csproj" ExcludeAssets="runtime" Private="false" />
+        <ProjectReference Include="../../Shoko/Shoko.QueueProcessor/Shoko.QueueProcessor.csproj" ExcludeAssets="runtime" Private="false" />
     </ItemGroup>
 
     <ItemGroup>
