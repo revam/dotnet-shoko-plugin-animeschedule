@@ -11,7 +11,8 @@ Data is provided by [AnimeSchedule.net](https://animeschedule.net/), as required
 - **Multi-episode releases** — a timetable entry covering several episodes at once (e.g. a two-episode premiere) is submitted as one airing per episode, linked together.
 - **Streaming channels** — registers a channel for every platform AnimeSchedule.net lists a stream on (Crunchyroll, Netflix, Amazon, Apple TV, Bilibili TV, Disney+, HIDIVE, Hulu, OceanVeil, YouTube and any platform added since), carrying the episode's page URL.
 - **Rate-limit aware** — reads AnimeSchedule.net's `X-RateLimit-*` response headers and backs off accordingly, rather than guessing a fixed request rate.
-- **Efficient sweeps** — the recurring sweep fetches each of the six timetable pages (raw/sub/dub × this week/next week) once per run and matches them against every series, instead of one round-trip per anime.
+- **Core-driven sweeps** — the provider implements `ISweepingAiringScheduleProvider`, so the server decides when a sweep is due and how long one chunk may run. A chunk fetches each of the six timetable pages (raw/sub/dub × this week/next week) once and matches them against every series, instead of one round-trip per anime, stops as soon as its deadline fires, and hands back the shoko series ID it got to as the cursor the next chunk resumes after.
+- **Delta writes** — a timetable covers a fortnight rather than a whole run, so airings are written with `MergeAirings`: the entries the timetables still list are submitted, an episode dropped from a week they do list is named as a removal, and the weeks either side are left alone.
 
 ## Requirements
 

@@ -329,5 +329,21 @@ public static class AnimeScheduleMapper
     /// both computed the same, testable way.
     /// </summary>
     public static (int Year, int Week) GetIsoWeek(DateTime utcDate)
-        => (System.Globalization.ISOWeek.GetYear(utcDate), System.Globalization.ISOWeek.GetWeekOfYear(utcDate));
+        => (ISOWeek.GetYear(utcDate), ISOWeek.GetWeekOfYear(utcDate));
+
+    /// <summary>
+    /// The stretch of time this week's and next week's timetables cover, in
+    /// UTC: the Monday of the ISO week containing <paramref name="utcNow"/>,
+    /// up to the Monday a fortnight later. It is what a delta write judges a
+    /// removal against, since a slot outside it is one neither timetable has
+    /// an opinion on.
+    /// </summary>
+    /// <param name="utcNow">The current time, in UTC.</param>
+    /// <returns>The window, in UTC, as a half-open range.</returns>
+    public static (DateTime FromUtc, DateTime ToUtc) GetTimetableWindow(DateTime utcNow)
+    {
+        var (year, week) = GetIsoWeek(utcNow);
+        var from = DateTime.SpecifyKind(ISOWeek.ToDateTime(year, week, DayOfWeek.Monday), DateTimeKind.Utc);
+        return (from, from.AddDays(14));
+    }
 }

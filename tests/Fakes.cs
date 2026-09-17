@@ -6,6 +6,10 @@ using Shoko.Abstractions.Config;
 using Shoko.Abstractions.Config.Enums;
 using Shoko.Abstractions.Config.Events;
 using Shoko.Abstractions.Config.Services;
+using Shoko.Abstractions.Metadata;
+using Shoko.Abstractions.Metadata.Anidb;
+using Shoko.Abstractions.Metadata.Services;
+using Shoko.Abstractions.Metadata.Shoko;
 using Shoko.Abstractions.Plugin;
 using Shoko.Abstractions.User;
 
@@ -157,5 +161,122 @@ internal sealed class StubHttpMessageHandler : System.Net.Http.HttpMessageHandle
         {
             Content = new System.Net.Http.StringContent(response.Body, System.Text.Encoding.UTF8, response.ContentType),
         });
+    }
+}
+
+/// <summary>
+/// Builds a stand-in for one of the host's interfaces, answering the members
+/// a test names and throwing <see cref="NotSupportedException"/> for every
+/// other one, so a code path that starts asking the host for more announces
+/// itself instead of quietly passing. The host's interfaces are wide and
+/// still moving, so this beats writing out a hundred members that only throw.
+/// </summary>
+internal static class Stub
+{
+    /// <summary>
+    /// A stand-in for <typeparamref name="T"/>.
+    /// </summary>
+    /// <typeparam name="T">The interface to stand in for.</typeparam>
+    /// <param name="answers">
+    /// The members to answer, by name, each taking the call's arguments.
+    /// Property getters are named without their <c>get_</c> prefix, and events
+    /// are always accepted and never raised.
+    /// </param>
+    /// <returns>The stand-in.</returns>
+    public static T Of<T>(params (string Member, Func<object?[], object?> Answer)[] answers) where T : class
+        => StubProxy<T>.Create(answers.ToDictionary(answer => answer.Member, answer => answer.Answer, StringComparer.Ordinal));
+}
+
+/// <inheritdoc cref="Stub"/>
+/// <typeparam name="T">The interface to stand in for.</typeparam>
+internal class StubProxy<T> : System.Reflection.DispatchProxy where T : class
+{
+    private IReadOnlyDictionary<string, Func<object?[], object?>> _answers = new Dictionary<string, Func<object?[], object?>>(StringComparer.Ordinal);
+
+    internal static T Create(IReadOnlyDictionary<string, Func<object?[], object?>> answers)
+    {
+        var proxy = Create<T, StubProxy<T>>()!;
+        ((StubProxy<T>)(object)proxy)._answers = answers;
+        return proxy;
+    }
+
+    /// <inheritdoc/>
+    /// <exception cref="NotSupportedException">The member was not stubbed.</exception>
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+    {
+        var name = targetMethod!.Name;
+        if (name.StartsWith("add_", StringComparison.Ordinal) || name.StartsWith("remove_", StringComparison.Ordinal))
+            return null;
+
+        var member = name.StartsWith("get_", StringComparison.Ordinal) || name.StartsWith("set_", StringComparison.Ordinal) ? name[4..] : name;
+        return _answers.TryGetValue(member, out var answer)
+            ? answer(args ?? [])
+            : throw new NotSupportedException($"{typeof(T).Name}.{member} was not stubbed.");
+    }
+}
+
+/// <summary>
+/// The host entities and services the sweep tests stand up.
+/// </summary>
+internal static class Host
+{
+    /// <summary>
+    /// A metadata service whose shoko provider holds the given series.
+    /// </summary>
+    /// <param name="series">The series the sweep walks.</param>
+    /// <returns>The metadata service.</returns>
+    public static IMetadataService MetadataService(IEnumerable<IShokoSeries> series)
+        => Stub.Of<IMetadataService>(("GetAllSeriesForProvider", args =>
+            (IMetadataService.ProviderName)args[0]! is IMetadataService.ProviderName.Shoko ? series.Cast<ISeries>() : Enumerable.Empty<ISeries>()));
+
+    /// <summary>
+    /// A shoko series backed by an AniDB anime of the same ID, which is all
+    /// the sweep reads before asking AnimeSchedule.net about it.
+    /// </summary>
+    /// <param name="seriesId">The shoko series ID.</param>
+    /// <returns>The series.</returns>
+    public static IShokoSeries ShokoSeries(int seriesId)
+        => Stub.Of<IShokoSeries>(
+            ("ID", _ => seriesId),
+            ("AnidbAnime", _ => Stub.Of<IAnidbAnime>(("ID", _ => seriesId)))
+        );
+}
+
+/// <summary>
+/// An <see cref="System.Net.Http.HttpMessageHandler"/> answering
+/// AnimeSchedule.net's timetables with an empty week and every other request
+/// with a 404, recording each request, and able to abort one the way a
+/// sweep's deadline aborts the request in flight.
+/// </summary>
+/// <param name="abortWhen">
+/// Optional. Called with each request URI and everything requested so far;
+/// answering <c>true</c> aborts that request.
+/// </param>
+internal sealed class StubAnimeScheduleHandler(Func<string, IReadOnlyList<string>, bool>? abortWhen = null) : System.Net.Http.HttpMessageHandler
+{
+    private readonly List<string> _requests = [];
+
+    /// <summary>
+    /// Every request URI, in order.
+    /// </summary>
+    public IReadOnlyList<string> Requests => _requests;
+
+    /// <inheritdoc/>
+    /// <exception cref="OperationCanceledException">The request was aborted.</exception>
+    protected override Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var uri = request.RequestUri!.PathAndQuery;
+        _requests.Add(uri);
+
+        if (abortWhen is not null && abortWhen(uri, _requests))
+            throw new OperationCanceledException(cancellationToken);
+
+        return Task.FromResult(uri.Contains("/timetables/", StringComparison.Ordinal)
+            ? new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new System.Net.Http.StringContent("[]", System.Text.Encoding.UTF8, "application/json"),
+            }
+            : new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.NotFound) { RequestMessage = request });
     }
 }

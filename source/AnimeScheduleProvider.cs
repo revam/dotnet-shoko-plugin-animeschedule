@@ -24,13 +24,22 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// one per streaming platform.
 /// </summary>
 /// <remarks>
+/// <para>
 /// AnimeSchedule.net's API terms require visible credit; the plugin's
 /// <see cref="Plugin.Description"/> and README carry that attribution. This
 /// provider keeps no database of its own: everything it knows is re-derived
 /// from the API on every refresh, with only short-lived in-memory caching to
 /// avoid redundant calls within a single sweep.
+/// </para>
+/// <para>
+/// A timetable covers one week, so a write only ever knows about this week
+/// and the next one. Airings go in through <c>MergeAirings</c> for that
+/// reason: the entries the timetables still list are submitted, an episode
+/// dropped from a week they do list is named as a removal, and everything
+/// outside the fortnight is left as it stands.
+/// </para>
 /// </remarks>
-public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuration>
+public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuration>, ISweepingAiringScheduleProvider
 {
     private static readonly TimeSpan AnimeInfoTtl = TimeSpan.FromHours(6);
     private static readonly TimeSpan AnimeInfoNegativeTtl = TimeSpan.FromHours(1);
@@ -82,6 +91,8 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         AiringKind.Dubbed,
     };
 
+    #region Refreshing
+
     /// <inheritdoc/>
     public async Task<bool> RefreshAsync(ISeries series, CancellationToken cancellationToken = default)
     {
@@ -102,8 +113,10 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             return false;
         }
 
-        var (year, week) = AnimeScheduleMapper.GetIsoWeek(DateTime.UtcNow);
-        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(DateTime.UtcNow.AddDays(7));
+        var now = DateTime.UtcNow;
+        var (year, week) = AnimeScheduleMapper.GetIsoWeek(now);
+        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(now.AddDays(7));
+        var window = AnimeScheduleMapper.GetTimetableWindow(now);
 
         foreach (var airType in AnimeScheduleMapper.AllAirTypes)
         {
@@ -119,58 +132,155 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             if (matching.Count == 0)
                 continue;
 
-            ApplyAirType(series, animeInfo, airType, matching);
+            ApplyAirType(series, animeInfo, airType, matching, window);
         }
 
         return true;
     }
 
+    #endregion
+
+    #region Sweeping
+
     /// <summary>
-    /// Runs one sweep for every Shoko-known series: fetches this and next
-    /// week's raw, sub and dub timetables once each (six requests, regardless
-    /// of library size), then applies them to every series whose AniDB anime
-    /// can be keyed to AnimeSchedule.net. Called by
-    /// <see cref="Jobs.AnimeScheduleSweepJob"/>.
+    /// AnimeSchedule.net edits the coming week all day long, moving a slot as
+    /// soon as a broadcaster announces it, so half an hour is a reasonable
+    /// cadence for a whole walk. The value actually used is the user's own
+    /// <c>AiringScheduleProviderInfo.SweepInterval</c>, which this only seeds,
+    /// and the server never sweeps more often than every fifteen minutes.
     /// </summary>
-    public async Task SweepAsync(CancellationToken cancellationToken = default)
+    public TimeSpan? SuggestedSweepInterval => TimeSpan.FromMinutes(30);
+
+    /// <inheritdoc/>
+    public async Task<string?> SweepAsync(string? cursor, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_configurationProvider.Load().AppToken))
         {
-            _logger.LogDebug("Skipping AnimeSchedule.net sweep: no app token configured.");
-            return;
+            _logger.LogDebug("Skipping the AnimeSchedule.net sweep: no app token configured.");
+            return null;
         }
 
-        var series = _metadataService.GetAllSeriesForProvider(IMetadataService.ProviderName.Shoko).ToList();
+        var after = ParseCursor(cursor);
+        var series = _metadataService.GetAllSeriesForProvider(IMetadataService.ProviderName.Shoko)
+            .Where(entry => entry.ID > after)
+            .OrderBy(entry => entry.ID)
+            .ToList();
         if (series.Count == 0)
-            return;
-
-        var (year, week) = AnimeScheduleMapper.GetIsoWeek(DateTime.UtcNow);
-        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(DateTime.UtcNow.AddDays(7));
-
-        // Pre-warm the shared timetable cache with one round-trip per air
-        // type per week, so the per-series RefreshAsync calls below make no
-        // further timetable requests of their own.
-        foreach (var airType in AnimeScheduleMapper.AllAirTypes)
         {
-            await GetTimetableCachedAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
-            await GetTimetableCachedAsync(airType, nextYear, nextWeek, cancellationToken).ConfigureAwait(false);
+            _logger.LogDebug("The sweep found no series after shoko series {SeriesID}, and has come full circle.", after);
+            return null;
         }
 
+        var now = DateTime.UtcNow;
+        var (year, week) = AnimeScheduleMapper.GetIsoWeek(now);
+        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(now.AddDays(7));
+
+        // Fill the shared timetable cache with one round-trip per air type
+        // per week, so the per-series refreshes below make no timetable
+        // requests of their own. Six requests, whatever the library's size.
+        try
+        {
+            foreach (var airType in AnimeScheduleMapper.AllAirTypes)
+            {
+                await GetTimetableCachedAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
+                await GetTimetableCachedAsync(airType, nextYear, nextWeek, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return ResumeAfter(after, 0);
+        }
+
+        var swept = 0;
         foreach (var oneSeries in series)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+                return ResumeAfter(after, swept);
+
             try
             {
                 await RefreshAsync(oneSeries, cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException)
+            {
+                // The budget ran out mid-request. Handing back the ground
+                // already covered beats letting the chunk end as a timeout,
+                // which would walk these series again from the old cursor.
+                return ResumeAfter(after, swept);
+            }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "AnimeSchedule.net sweep failed for series {SeriesID}.", oneSeries.ID);
+                // One series AnimeSchedule.net answers oddly for is not worth
+                // stalling the walk over; the cursor moves past it either way.
+                _logger.LogWarning(ex, "The AnimeSchedule.net sweep failed for series {SeriesID}.", oneSeries.ID);
             }
+
+            after = oneSeries.ID;
+            swept++;
+        }
+
+        _logger.LogDebug("The sweep covered the last {Count} series, and has come full circle.", swept);
+        return null;
+
+        string ResumeAfter(int seriesId, int count)
+        {
+            _logger.LogDebug(
+                "The sweep covered {Count} series before running out of budget; the next chunk resumes after shoko series {SeriesID}.",
+                count,
+                seriesId
+            );
+            return FormatCursor(seriesId);
         }
     }
 
-    private void ApplyAirType(ISeries series, AnimeScheduleAnimeInfo animeInfo, AnimeScheduleAirType airType, IReadOnlyList<AnimeScheduleTimetableEntry> entries)
+    /// <summary>
+    /// Reads the shoko series ID the last chunk finished at out of the
+    /// cursor. A cursor that cannot be read starts the sweep over rather than
+    /// ending it, since an unreadable cursor says nothing about what has been
+    /// covered.
+    /// </summary>
+    /// <param name="cursor">The cursor the chunk was called with.</param>
+    /// <returns>The shoko series ID to resume after; <c>0</c> starts a fresh sweep.</returns>
+    private int ParseCursor(string? cursor)
+    {
+        if (string.IsNullOrEmpty(cursor))
+            return 0;
+
+        if (int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out var seriesId))
+            return seriesId;
+
+        _logger.LogWarning("Starting a fresh sweep: the cursor \"{Cursor}\" is not a shoko series ID.", cursor);
+        return 0;
+    }
+
+    /// <summary>
+    /// Writes the shoko series ID to resume after as a cursor.
+    /// </summary>
+    /// <param name="seriesId">The shoko series ID the chunk finished at.</param>
+    /// <returns>The cursor.</returns>
+    private static string FormatCursor(int seriesId)
+        => seriesId.ToString(CultureInfo.InvariantCulture);
+
+    #endregion
+
+    #region Writing
+
+    /// <summary>
+    /// Writes one air type's entries as a schedule per streaming platform,
+    /// and the airings on each.
+    /// </summary>
+    /// <param name="series">The series the schedules are for.</param>
+    /// <param name="animeInfo">What AnimeSchedule.net knows about the anime.</param>
+    /// <param name="airType">The air type the entries came from.</param>
+    /// <param name="entries">This week's and next week's entries for the anime.</param>
+    /// <param name="window">The stretch of time those two weeks cover, in UTC.</param>
+    private void ApplyAirType(
+        ISeries series,
+        AnimeScheduleAnimeInfo animeInfo,
+        AnimeScheduleAirType airType,
+        IReadOnlyList<AnimeScheduleTimetableEntry> entries,
+        (DateTime FromUtc, DateTime ToUtc) window
+    )
     {
         var donghua = entries.Any(e => e.Donghua);
         var track = AnimeScheduleMapper.BuildTrack(airType, donghua);
@@ -208,11 +318,24 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
                 continue;
             }
 
-            SetAiringsForSchedule(series, schedule, entries);
+            WriteAiringsForSchedule(series, schedule, entries, window);
         }
     }
 
-    private void SetAiringsForSchedule(ISeries series, IAiringSchedule schedule, IReadOnlyList<AnimeScheduleTimetableEntry> entries)
+    /// <summary>
+    /// Writes the airings one schedule takes from this week's and next week's
+    /// entries, and links the episodes a single release covers together.
+    /// </summary>
+    /// <param name="series">The series the schedule is for.</param>
+    /// <param name="schedule">The schedule to write to.</param>
+    /// <param name="entries">The entries to write.</param>
+    /// <param name="window">The stretch of time the entries cover, in UTC.</param>
+    private void WriteAiringsForSchedule(
+        ISeries series,
+        IAiringSchedule schedule,
+        IReadOnlyList<AnimeScheduleTimetableEntry> entries,
+        (DateTime FromUtc, DateTime ToUtc) window
+    )
     {
         var airingData = new List<EpisodeAiringData>();
         var linkGroups = new List<IReadOnlyList<int>>();
@@ -241,14 +364,18 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         if (airingData.Count == 0)
             return;
 
+        // A timetable is a fortnight of one run, never the whole of it, so
+        // the write is a delta: an episode this fortnight no longer lists is
+        // named as a removal, and the weeks either side of it are untouched.
         IReadOnlyList<IEpisodeAiring> result;
         try
         {
-            result = _scheduleService.SetAirings(this, schedule, airingData, new EpisodeAiringUpdateOptions { InferDelays = false });
+            var withdrawn = FindWithdrawnAirings(schedule, airingData, window);
+            result = _scheduleService.MergeAirings(this, schedule, airingData, withdrawn, new EpisodeAiringUpdateOptions { InferDelays = false });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to set AnimeSchedule.net airings for schedule {ScheduleID}.", schedule.ID);
+            _logger.LogWarning(ex, "Failed to write the AnimeSchedule.net airings for schedule {ScheduleID}.", schedule.ID);
             return;
         }
 
@@ -277,6 +404,34 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             }
         }
     }
+
+    /// <summary>
+    /// The airings already on the schedule, inside the fortnight the
+    /// timetables cover, that those timetables no longer list. An episode
+    /// AnimeSchedule.net has dropped from a week it still publishes reaches
+    /// the service through this, the same way leaving it out of a whole-line
+    /// write would.
+    /// </summary>
+    /// <param name="schedule">The schedule being written.</param>
+    /// <param name="airings">The airings this write submits.</param>
+    /// <param name="window">The stretch of time the timetables cover, in UTC.</param>
+    /// <returns>The airings to name as removals.</returns>
+    private IReadOnlyList<IEpisodeAiring> FindWithdrawnAirings(
+        IAiringSchedule schedule,
+        IReadOnlyList<EpisodeAiringData> airings,
+        (DateTime FromUtc, DateTime ToUtc) window
+    )
+    {
+        var submitted = new HashSet<string>(airings.Select(airing => airing.Key!), StringComparer.Ordinal);
+        return _scheduleService
+            .GetAiringsForSchedule(schedule.ID, new EpisodeAiringFilteringOptions { IncludeEstimates = false })
+            .Where(airing => airing.AiredAt is { } airedAt && airedAt >= window.FromUtc && airedAt < window.ToUtc && !submitted.Contains(airing.Key))
+            .ToList();
+    }
+
+    #endregion
+
+    #region Caching
 
     private async Task<AnimeScheduleAnimeInfo?> ResolveAnimeInfoAsync(int anidbAnimeId, CancellationToken cancellationToken)
     {
@@ -309,4 +464,6 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
 
     private static IEpisode? FindEpisode(ISeries series, int episodeNumber)
         => series.Episodes.FirstOrDefault(e => e.Type == EpisodeType.Episode && e.EpisodeNumber == episodeNumber);
+
+    #endregion
 }

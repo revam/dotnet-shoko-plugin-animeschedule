@@ -1,11 +1,8 @@
 using System;
 using System.Threading;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Shoko.Abstractions.Plugin;
 using Shoko.Plugin.AnimeSchedule.Api;
-using Shoko.Plugin.AnimeSchedule.Jobs;
-using Shoko.QueueProcessor.Scheduling;
 
 namespace Shoko.Plugin.AnimeSchedule;
 
@@ -17,7 +14,7 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// AnimeSchedule.net's API terms of use require visible credit to
 /// AnimeSchedule.net wherever data from it is shown; see the README.
 /// </remarks>
-public class Plugin : IPlugin, IPluginServiceRegistration, IPluginApplicationRegistration
+public class Plugin : IPlugin, IPluginServiceRegistration
 {
     /// <inheritdoc/>
     public Guid ID { get; private init; } = new("a92b3752-688a-408f-a03a-bad24718449a");
@@ -36,8 +33,10 @@ public class Plugin : IPlugin, IPluginServiceRegistration, IPluginApplicationReg
     /// <inheritdoc/>
     public static void RegisterServices(IServiceCollection serviceCollection, IApplicationPaths applicationPaths)
     {
+        // The provider itself is not registered: the server finds it by
+        // reflection, constructs it with these services, and sweeps that very
+        // instance, so nothing here needs a reference to it.
         serviceCollection.AddSingleton<AnimeScheduleRateLimiter>();
-        serviceCollection.AddSingleton<AnimeScheduleProvider>();
         serviceCollection.AddHttpClient<AnimeScheduleApiClient>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Shoko.Plugin.AnimeSchedule/1.0 (+https://github.com/revam/dotnet-shoko-plugin-animeschedule)");
@@ -48,12 +47,5 @@ public class Plugin : IPlugin, IPluginServiceRegistration, IPluginApplicationReg
                 handler.PooledConnectionLifetime = TimeSpan.FromMinutes(2);
                 handler.PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1);
             });
-    }
-
-    /// <inheritdoc/>
-    public static void RegisterServices(IApplicationBuilder application, IApplicationPaths applicationPaths)
-    {
-        var registry = application.ApplicationServices.GetRequiredService<RecurringJobRegistry>();
-        registry.Register<AnimeScheduleSweepJob>(interval: TimeSpan.FromMinutes(30), runImmediately: true);
     }
 }
