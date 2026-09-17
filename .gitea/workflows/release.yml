@@ -180,6 +180,13 @@ jobs:
       # reads the project from the working directory, hence `source`, and
       # updates the manifest in place - the live one, fetched over the stub
       # by the step above.
+      #
+      # Everything after the bare `--` is forwarded to MSBuild, and `-p` on
+      # its own is shoko-build's prune flag, so the property has to sit past
+      # the separator. `RepositoryUrl` is supplied per build rather than set
+      # in the csproj: `stable` is published to both hosts, and the pair of
+      # `github.server_url` and `github.repository` names whichever one is
+      # running the build.
       - name: Build and package
         working-directory: source
         run: |
@@ -190,7 +197,9 @@ jobs:
             --release-notes-path "${RUNNER_TEMP}/release-notes.md" \
             --manifest "${GITHUB_WORKSPACE}/${IDENTITY_MANIFEST}" \
             --output "${GITHUB_WORKSPACE}/dist/{name}-{tag}-{runtime}.zip" \
-            --url "${ASSET_BASE_URL}/{tag}/{name}-{tag}-{runtime}.zip"
+            --url "${ASSET_BASE_URL}/{tag}/{name}-{tag}-{runtime}.zip" \
+            -- \
+            -p:RepositoryUrl=${{ github.server_url }}/${{ github.repository }}
 
       # A glob rather than a name, so an archive per runtime identifier
       # uploads without touching this step.

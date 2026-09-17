@@ -6,7 +6,6 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <Title>Shoko AnimeSchedule.net</Title>
         <Authors>revam</Authors>
-        <RepositoryUrl>https://github.com/revam/dotnet-shoko-plugin-animeschedule</RepositoryUrl>
         <Version>1.0.0</Version>
         <Configurations>Debug;Release</Configurations>
         <Platforms>AnyCPU;x64</Platforms>
