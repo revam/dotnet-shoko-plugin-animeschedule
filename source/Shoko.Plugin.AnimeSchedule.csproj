@@ -16,15 +16,11 @@
     </PropertyGroup>
 
     <!--
-        The server supplies the abstractions and the queue engine at runtime, so
-        only compile-time assets are referenced here. `native` goes with
-        `runtime`: on its own `runtime` leaves the queue engine's transitive
-        SQLite and SqlClient packages free to drop their whole `runtimes/` tree
-        into the plugin output.
+        The server supplies the abstractions at runtime, so only compile-time
+        assets are referenced here.
     -->
     <ItemGroup>
         <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.89" ExcludeAssets="runtime" />
-        <PackageReference Include="Shoko.QueueProcessor" Version="6.0.0-alpha.6" ExcludeAssets="runtime;native" />
     </ItemGroup>
 
     <ItemGroup>
