@@ -21,11 +21,13 @@ env:
   # CIs writing one file on it would fork the branch across the remotes
   # and make every later push a non-fast-forward.
   METADATA_BRANCH: metadata
-  # `<channel>/manifest.json`. The channel is the axis the manifest format
-  # already carries and the axis `--prune-method channel` groups by, and
-  # stable and dev are separate subscriptions rather than two entries in
-  # one list. There is no plugin axis: this repository holds one plugin.
-  MANIFEST_PATH: stable/manifest.json
+  # One manifest at the branch root rather than one per release channel.
+  # A channel split earns its own path only where high-churn dev releases
+  # exist that stable users have to opt into rather than receive by
+  # accident, and this repository cuts stable releases alone. The flat
+  # path is also what every other plugin repository here publishes at.
+  # There is no plugin axis either: this repository holds one plugin.
+  MANIFEST_PATH: manifest.json
   # The stub in the work tree. `Shoko.BuildTools.Targets` reaches it from
   # `source/` through the parent leg of its search and stamps what it
   # reads into the assembly, and `shoko-build` takes identity, tags and
@@ -79,11 +81,11 @@ jobs:
           #
           # No fallback. The branch is seeded by hand once, and falling
           # back to the stub in the work tree would publish a release
-          # against a description that says it is a development build,
-          # with an empty release list in front of it. A fetch of a
-          # refspec naming a branch the remote does not have exits 128
-          # with "couldn't find remote ref", so a first run stops here,
-          # before the build and well before the upload.
+          # against a description that says it is a stub and points at
+          # this very branch, with an empty release list in front of it.
+          # A fetch of a refspec naming a branch the remote does not
+          # have exits 128 with "couldn't find remote ref", so a first
+          # run stops here, before the build and well before the upload.
           git fetch --no-tags origin "+refs/heads/${METADATA_BRANCH}:refs/remotes/origin/${METADATA_BRANCH}"
           git show "origin/${METADATA_BRANCH}:${MANIFEST_PATH}" > "${IDENTITY_MANIFEST}"
 
@@ -144,11 +146,14 @@ jobs:
           # The manifest travels in RUNNER_TEMP rather than in a stash: a
           # stash of a path that already exists on the metadata branch
           # conflicts on every apply. The work tree also has to be clean
-          # to switch branches, and the stub is tracked here and absent
-          # there, so the copy has to happen before the reset.
+          # to switch branches, and both branches track this path, so the
+          # copy has to land outside the tree, and has to happen before
+          # the reset puts the stub back over what was just built.
           cp "${IDENTITY_MANIFEST}" "${RUNNER_TEMP}/manifest.json"
           git reset --hard
           git checkout -B "${METADATA_BRANCH}" "origin/${METADATA_BRANCH}"
+          # A no-op for a path at the branch root, and what keeps
+          # MANIFEST_PATH free to name a subdirectory.
           mkdir -p "$(dirname "${MANIFEST_PATH}")"
           cp "${RUNNER_TEMP}/manifest.json" "${MANIFEST_PATH}"
           git config user.name "github-actions[bot]"

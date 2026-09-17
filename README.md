@@ -30,7 +30,7 @@ The provider does nothing (and `RefreshAsync` returns `false`) until a token is 
 1. Open the Shoko Web UI and navigate to **Settings → Plugins → Repositories**.
 2. Add the manifest URL:
    ```
-   https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/stable/manifest.json
+   https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/metadata/manifest.json
    ```
 3. Go to **Settings → Plugins → Browse** and find **AnimeSchedule.net**.
 4. Click **Install** on the desired version.
