@@ -1,83 +1,73 @@
 name: Release Build
 
+# The GitHub half of dual hosting (.gitea/workflows/release.yml is the
+# Gitea half). Both fire at the same tag, each builds its own archive and
+# each writes its own manifest naming its own copy, because the two
+# archives are not the same bytes: the assembly embeds the checkout path
+# and the zip embeds the mtimes, so one checksum cannot describe both.
+
 on:
   release:
     types: [published]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned. `ubuntu-latest` is a moving pointer, and 24.04 is the image
+    # that carries node24, which the action pins below need, node20 being
+    # end of life.
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      # The image has no SDK. `global-json-file` rather than a literal
+      # version, so this cannot drift from what a developer builds with.
+      - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
-      - name: Build
-        run: dotnet build Shoko.Plugin.AnimeSchedule.slnx --configuration Release
+      # Pinned in .config/dotnet-tools.json, so the packaging of a release
+      # is reproducible instead of depending on whichever shoko-build is
+      # latest on the day it is cut.
+      - name: Restore the build tool
+        run: dotnet tool restore
 
-      - name: Package
+      # shoko-build discovers the plugin tags from the source, builds the
+      # project, packs the whole output directory (dependencies and the
+      # .deps.json included, not just the plugin assembly), checksums the
+      # archive and writes the release entry into the manifest with the
+      # abstraction version the assembly was actually compiled against. It
+      # reads the project from the working directory, hence `source`.
+      - name: Build and package
+        working-directory: source
+        env:
+          RELEASE_NOTES: ${{ github.event.release.body }}
         run: |
-          ZIP_NAME="Shoko.Plugin.AnimeSchedule-${{ github.event.release.tag_name }}-any.zip"
-          cd source/bin/Release/net10.0
-          zip "../../../../${ZIP_NAME}" Shoko.Plugin.AnimeSchedule.dll
-          cd ../../../..
-          echo "ZIP_NAME=${ZIP_NAME}" >> "$GITHUB_ENV"
+          dotnet shoko-build \
+            --configuration Release \
+            --channel Stable \
+            --tag "${{ github.event.release.tag_name }}" \
+            --manifest "${GITHUB_WORKSPACE}/manifest.json" \
+            --output "${GITHUB_WORKSPACE}/dist/{name}-{tag}-{runtime}.zip" \
+            --url "${{ github.server_url }}/${{ github.repository }}/releases/download/{tag}/{name}-{tag}-{runtime}.zip"
 
+      # A glob rather than a name, so an archive per runtime identifier
+      # uploads without touching this step.
       - name: Upload to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            "${ZIP_NAME}" \
+            dist/*.zip \
             --repo "${{ github.repository }}"
 
       - name: Update Manifest
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          SOURCE_REVISION=$(git rev-parse HEAD)
-          RELEASED_AT="${{ github.event.release.published_at }}"
-          CHECKSUM=$(sha256sum "${ZIP_NAME}" | awk '{ print $1 }')
-          URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${ZIP_NAME}"
-
-          RELEASE_ENTRY=$(jq -n \
-            --arg version "$VERSION" \
-            --arg tag "$TAG" \
-            --arg source_revision "$SOURCE_REVISION" \
-            --arg released_at "$RELEASED_AT" \
-            --arg url "$URL" \
-            --arg checksum "$CHECKSUM" \
-            '{
-              version: $version,
-              tag: $tag,
-              source_revision: $source_revision,
-              released_at: $released_at,
-              channel: "Stable",
-              release_notes: null,
-              archives: [
-                {
-                  runtime: "any",
-                  abstraction: "6.0.0",
-                  url: $url,
-                  checksum: $checksum
-                }
-              ]
-            }')
-
-          jq --argjson release "$RELEASE_ENTRY" '
-            .releases |= [ $release ] + (. | map(select(.version != $release.version)))
-          ' manifest.json > manifest.json.tmp && mv manifest.json.tmp manifest.json
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add manifest.json
-          git commit -m "ci: update manifest for ${TAG}"
+          git commit -m "ci: update manifest for ${{ github.event.release.tag_name }}"
           git push origin HEAD:stable

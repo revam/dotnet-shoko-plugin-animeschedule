@@ -16,15 +16,15 @@
     </PropertyGroup>
 
     <!--
-        The abstractions and queue processor contracts are being developed
-        concurrently with this plugin, so both are referenced by project path
-        against the in-progress checkout rather than a published package.
-        Switch back to PackageReference once a matching abstractions release
-        ships.
+        The server supplies the abstractions and the queue engine at runtime, so
+        only compile-time assets are referenced here. `native` goes with
+        `runtime`: on its own `runtime` leaves the queue engine's transitive
+        SQLite and SqlClient packages free to drop their whole `runtimes/` tree
+        into the plugin output.
     -->
     <ItemGroup>
         <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.89" ExcludeAssets="runtime" />
-        <PackageReference Include="Shoko.QueueProcessor" Version="6.0.0-alpha.6" ExcludeAssets="runtime" />
+        <PackageReference Include="Shoko.QueueProcessor" Version="6.0.0-alpha.6" ExcludeAssets="runtime;native" />
     </ItemGroup>
 
     <ItemGroup>
@@ -32,6 +32,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- Injects the embedded plugin identity metadata the server reads during
+             discovery. PrivateAssets alone is not enough: without ExcludeAssets
+             the package's own MSBuild tasks and satellite assemblies end up in
+             the plugin output. -->
+        <PackageReference Include="Shoko.BuildTools.Targets" Version="0.3.0" PrivateAssets="All" ExcludeAssets="runtime" />
         <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="10.0.203" PrivateAssets="All" />
         <PackageReference Include="SmartAnalyzers.MultithreadingAnalyzer" Version="1.1.31" PrivateAssets="All" />
     </ItemGroup>
