@@ -37,9 +37,18 @@ public class Plugin : IPlugin, IPluginServiceRegistration
         // reflection, constructs it with these services, and sweeps that very
         // instance, so nothing here needs a reference to it.
         serviceCollection.AddSingleton<AnimeScheduleRateLimiter>();
-        serviceCollection.AddHttpClient<AnimeScheduleApiClient>(client =>
+        // The contact URL is read back from the plugin's own registered info
+        // rather than written here, so it names wherever this build was
+        // published from instead of hard-coding one host into the source. A
+        // local build has no repository URL stamped, so the comment is left
+        // off rather than sent empty.
+        serviceCollection.AddHttpClient<AnimeScheduleApiClient>((provider, client) =>
         {
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Shoko.Plugin.AnimeSchedule/1.0 (+https://github.com/revam/dotnet-shoko-plugin-animeschedule)");
+            var info = provider.GetRequiredService<IPluginManager>().GetPluginInfo<Plugin>();
+            var userAgent = $"Shoko.Plugin.AnimeSchedule/{info?.Version.Version.ToString(3) ?? "1.0"}";
+            if (info?.RepositoryUrl is { Length: > 0 } repositoryUrl)
+                userAgent += $" (+{repositoryUrl})";
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
         })
             .SetHandlerLifetime(Timeout.InfiniteTimeSpan)
             .UseSocketsHttpHandler((handler, _) =>
