@@ -5,10 +5,38 @@ name: Release Build
 # each writes its own manifest naming its own copy, because the two
 # archives are not the same bytes: the assembly embeds the checkout path
 # and the zip embeds the mtimes, so one checksum cannot describe both.
+#
+# The two halves run the same steps in the same order. They differ only
+# where the hosts do: the asset base URL, the token, the uploader, and
+# where the release notes come from.
 
 on:
   release:
     types: [published]
+
+env:
+  # The published manifest lives on a branch of its own and CI writes
+  # nowhere else. A manifest committed to `stable` is a bot commit on the
+  # branch people work from; and `stable` is shared with Gitea, so two
+  # CIs writing one file on it would fork the branch across the remotes
+  # and make every later push a non-fast-forward.
+  METADATA_BRANCH: metadata
+  # `<channel>/manifest.json`. The channel is the axis the manifest format
+  # already carries and the axis `--prune-method channel` groups by, and
+  # stable and dev are separate subscriptions rather than two entries in
+  # one list. There is no plugin axis: this repository holds one plugin.
+  MANIFEST_PATH: stable/manifest.json
+  # The stub in the work tree. `Shoko.BuildTools.Targets` reaches it from
+  # `source/` through the parent leg of its search and stamps what it
+  # reads into the assembly, and `shoko-build` takes identity, tags and
+  # dependencies from the same path. The live manifest is pulled over it
+  # before anything builds, so the embedded metadata and the published
+  # manifest are read from one file and cannot disagree.
+  IDENTITY_MANIFEST: manifest.json
+  # GitHub serves release assets from its own download route under the
+  # repository, so the base is the server and repository this run already
+  # names rather than a CDN in front of them.
+  ASSET_BASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download
 
 jobs:
   build:
@@ -44,6 +72,37 @@ jobs:
             exit 1
           fi
 
+      - name: Fetch the live manifest
+        run: |
+          # checkout only sets up a remote-tracking ref for the branch it
+          # checked out, hence the explicit refspec.
+          #
+          # No fallback. The branch is seeded by hand once, and falling
+          # back to the stub in the work tree would publish a release
+          # against a description that says it is a development build,
+          # with an empty release list in front of it. A fetch of a
+          # refspec naming a branch the remote does not have exits 128
+          # with "couldn't find remote ref", so a first run stops here,
+          # before the build and well before the upload.
+          git fetch --no-tags origin "+refs/heads/${METADATA_BRANCH}:refs/remotes/origin/${METADATA_BRANCH}"
+          git show "origin/${METADATA_BRANCH}:${MANIFEST_PATH}" > "${IDENTITY_MANIFEST}"
+
+      - name: Read the release notes
+        env:
+          # The body through the environment rather than an expression
+          # inside `run:`. Release notes are arbitrary markdown from a
+          # human, and interpolating them into a shell script would let a
+          # backtick or a `$(` in someone's notes run as a command on the
+          # runner.
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          # GitHub carries the body on the release event, so it is taken
+          # from there rather than read back from the API. The file is
+          # always written, empty if there is no body: a
+          # --release-notes-path it cannot read stops shoko-build, while
+          # an empty one just leaves the notes off the release entry.
+          printf '%s' "${RELEASE_BODY}" > "${RUNNER_TEMP}/release-notes.md"
+
       # Pinned in .config/dotnet-tools.json, so the packaging of a release
       # is reproducible instead of depending on whichever shoko-build is
       # latest on the day it is cut.
@@ -55,19 +114,20 @@ jobs:
       # .deps.json included, not just the plugin assembly), checksums the
       # archive and writes the release entry into the manifest with the
       # abstraction version the assembly was actually compiled against. It
-      # reads the project from the working directory, hence `source`.
+      # reads the project from the working directory, hence `source`, and
+      # updates the manifest in place - the live one, fetched over the stub
+      # by the step above.
       - name: Build and package
         working-directory: source
-        env:
-          RELEASE_NOTES: ${{ github.event.release.body }}
         run: |
           dotnet shoko-build \
             --configuration Release \
             --channel Stable \
             --tag "${{ github.event.release.tag_name }}" \
-            --manifest "${GITHUB_WORKSPACE}/manifest.json" \
+            --release-notes-path "${RUNNER_TEMP}/release-notes.md" \
+            --manifest "${GITHUB_WORKSPACE}/${IDENTITY_MANIFEST}" \
             --output "${GITHUB_WORKSPACE}/dist/{name}-{tag}-{runtime}.zip" \
-            --url "${{ github.server_url }}/${{ github.repository }}/releases/download/{tag}/{name}-{tag}-{runtime}.zip"
+            --url "${ASSET_BASE_URL}/{tag}/{name}-{tag}-{runtime}.zip"
 
       # A glob rather than a name, so an archive per runtime identifier
       # uploads without touching this step.
@@ -79,10 +139,33 @@ jobs:
             dist/*.zip \
             --repo "${{ github.repository }}"
 
-      - name: Update Manifest
+      - name: Commit the manifest on the metadata branch
         run: |
+          # The manifest travels in RUNNER_TEMP rather than in a stash: a
+          # stash of a path that already exists on the metadata branch
+          # conflicts on every apply. The work tree also has to be clean
+          # to switch branches, and the stub is tracked here and absent
+          # there, so the copy has to happen before the reset.
+          cp "${IDENTITY_MANIFEST}" "${RUNNER_TEMP}/manifest.json"
+          git reset --hard
+          git checkout -B "${METADATA_BRANCH}" "origin/${METADATA_BRANCH}"
+          mkdir -p "$(dirname "${MANIFEST_PATH}")"
+          cp "${RUNNER_TEMP}/manifest.json" "${MANIFEST_PATH}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add manifest.json
-          git commit -m "ci: update manifest for ${{ github.event.release.tag_name }}"
-          git push origin HEAD:stable
+          git add "${MANIFEST_PATH}"
+          # The only commit and the only push, and it is on the metadata
+          # branch. Nothing lands on a source branch, so `stable` stays
+          # byte-identical on both remotes and nobody has to pull a bot
+          # commit before their next change.
+          #
+          # Guarded, because `git commit` exits 1 on an empty index and
+          # this step runs after the assets are uploaded: a re-run that
+          # produced a byte-identical manifest would otherwise fail a
+          # release that had already succeeded.
+          if git diff --cached --quiet; then
+            echo "Manifest unchanged; nothing to commit."
+          else
+            git commit -m "ci: update manifest for ${{ github.event.release.tag_name }}"
+            git push origin "${METADATA_BRANCH}"
+          fi
