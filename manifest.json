@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ShokoAnime/ShokoServer/master/Shoko.BuildTools/manifest.schema.json",
+  "id": "a92b3752-688a-408f-a03a-bad24718449a",
+  "type": "package",
+  "name": "AnimeSchedule.net",
+  "overview": "Pulls airing schedules, delays and stream links from AnimeSchedule.net for the anime in your library. Requires your own AnimeSchedule.net application token.",
+  "authors": "revam",
+  "repository_url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule",
+  "tags": [
+    "airing",
+    "schedule",
+    "animeschedule",
+    "calendar",
+    "streaming"
+  ],
+  "releases": []
+}
