@@ -29,6 +29,21 @@ jobs:
         with:
           global-json-file: global.json
 
+      # `shoko-build` keys a manifest entry by the project's `<Version>`, not by
+      # the tag, so a tag cut without bumping the project rewrites the previous
+      # entry in place instead of adding one, leaving a manifest whose `version`
+      # and `tag` disagree. Fail here rather than publish that.
+      - name: Check the version matches the tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          PROJECT=$(ls source/*.csproj)
+          VERSION=$(dotnet msbuild "${PROJECT}" -getProperty:Version -nologo)
+          if [ "${TAG#v}" != "${VERSION}" ]; then
+            echo "Tag ${TAG} does not match <Version> ${VERSION} in ${PROJECT}." >&2
+            echo "Bump the project version, or re-cut the tag as v${VERSION}." >&2
+            exit 1
+          fi
+
       # Pinned in .config/dotnet-tools.json, so the packaging of a release
       # is reproducible instead of depending on whichever shoko-build is
       # latest on the day it is cut.
