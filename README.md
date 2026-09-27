@@ -61,7 +61,7 @@ The provider does nothing (and `RefreshAsync` returns `false`) until a token is 
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
-This plugin is developed alongside the in-progress `IAiringScheduleService` abstractions, so `source/Shoko.Plugin.AnimeSchedule.csproj` and `tests/Shoko.Plugin.AnimeSchedule.Tests.csproj` reference `Shoko.Abstractions`/`Shoko.QueueProcessor` by project path (`../../Shoko/...`) rather than by NuGet package. Check out [ShokoServer](https://github.com/ShokoAnime/ShokoServer) as a sibling directory named `Shoko` before building, or repoint the `ProjectReference` entries at a published `Shoko.Abstractions`/`Shoko.QueueProcessor` package once one ships with the airing schedule contract.
+`Shoko.Abstractions` is a package reference, and the airing schedule contract is only in its 6.0 prereleases, so the feed that carries the version in `source/Shoko.Plugin.AnimeSchedule.csproj` has to be one of your NuGet sources.
 
 ```bash
 dotnet restore
