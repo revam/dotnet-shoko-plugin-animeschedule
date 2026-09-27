@@ -97,19 +97,19 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     public async Task<bool> RefreshAsync(ISeries series, CancellationToken cancellationToken = default)
     {
         var anidbAnime = ResolveAnidbAnime(series);
-        if (anidbAnime is null)
+        if (anidbAnime is null || !anidbAnime.ID.TryGetNumericID<int>(out var anidbAnimeId))
             return false;
 
         if (string.IsNullOrWhiteSpace(_configurationProvider.Load().AppToken))
         {
-            _logger.LogDebug("Skipping AnimeSchedule.net refresh for AniDB anime {AnimeID}: no app token configured.", anidbAnime.ID);
+            _logger.LogDebug("Skipping AnimeSchedule.net refresh for AniDB anime {AnimeID}: no app token configured.", anidbAnimeId);
             return false;
         }
 
-        var animeInfo = await ResolveAnimeInfoAsync(anidbAnime.ID, cancellationToken).ConfigureAwait(false);
+        var animeInfo = await ResolveAnimeInfoAsync(anidbAnimeId, cancellationToken).ConfigureAwait(false);
         if (animeInfo is null)
         {
-            _logger.LogDebug("AnimeSchedule.net does not know AniDB anime {AnimeID}.", anidbAnime.ID);
+            _logger.LogDebug("AnimeSchedule.net does not know AniDB anime {AnimeID}.", anidbAnimeId);
             return false;
         }
 
@@ -161,9 +161,9 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         }
 
         var after = ParseCursor(cursor);
-        var series = _metadataService.GetAllSeriesForProvider(IMetadataService.ProviderName.Shoko)
-            .Where(entry => entry.ID > after)
-            .OrderBy(entry => entry.ID)
+        var series = _metadataService.GetAllShokoSeries()
+            .Where(entry => entry.LocalID > after)
+            .OrderBy(entry => entry.LocalID)
             .ToList();
         if (series.Count == 0)
         {
@@ -212,10 +212,10 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             {
                 // One series AnimeSchedule.net answers oddly for is not worth
                 // stalling the walk over; the cursor moves past it either way.
-                _logger.LogWarning(ex, "The AnimeSchedule.net sweep failed for series {SeriesID}.", oneSeries.ID);
+                _logger.LogWarning(ex, "The AnimeSchedule.net sweep failed for shoko series {SeriesID}.", oneSeries.LocalID);
             }
 
-            after = oneSeries.ID;
+            after = oneSeries.LocalID;
             swept++;
         }
 
@@ -297,7 +297,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             var scheduleData = new AiringScheduleData
             {
                 Series = series,
-                ChannelID = channel?.ID,
+                ChannelID = channel?.ChannelID,
                 Tracks = [track],
                 FirstEpisodeNumber = 1,
                 LastEpisodeNumber = lastEpisodeNumber,
@@ -384,9 +384,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             var toLink = group
                 .Select(number => episodeByNumber.GetValueOrDefault(number))
                 .Where(episode => episode is not null)
-                .Select(episode => result.FirstOrDefault(a =>
-                    a.EpisodeSource == episode!.Source
-                    && a.EpisodeID == episode.ID.ToString(CultureInfo.InvariantCulture)))
+                .Select(episode => result.FirstOrDefault(a => a.EpisodeID == episode!.ID))
                 .Where(airing => airing is not null)
                 .Select(airing => airing!)
                 .ToList();

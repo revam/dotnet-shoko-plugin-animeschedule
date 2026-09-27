@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using NJsonSchema;
 using Shoko.Abstractions.Config;
@@ -90,6 +91,12 @@ internal sealed class FakeConfigurationService(Configuration configuration) : IC
     public JsonSchema GenerateSchema(Type type) => throw new NotSupportedException();
 
     public string Serialize(IConfiguration config) => throw new NotSupportedException();
+
+    public string SerializeWithMasking(IConfiguration config) => throw new NotSupportedException();
+
+    public string MaskSecrets(ConfigurationInfo info, string json) => throw new NotSupportedException();
+
+    public string RestoreMaskedSecrets(ConfigurationInfo info, string json) => throw new NotSupportedException();
 
     public IConfiguration Deserialize(ConfigurationInfo info, string json) => throw new NotSupportedException();
 }
@@ -221,13 +228,12 @@ internal class StubProxy<T> : System.Reflection.DispatchProxy where T : class
 internal static class Host
 {
     /// <summary>
-    /// A metadata service whose shoko provider holds the given series.
+    /// A metadata service holding the given shoko series.
     /// </summary>
     /// <param name="series">The series the sweep walks.</param>
     /// <returns>The metadata service.</returns>
     public static IMetadataService MetadataService(IEnumerable<IShokoSeries> series)
-        => Stub.Of<IMetadataService>(("GetAllSeriesForProvider", args =>
-            (IMetadataService.ProviderName)args[0]! is IMetadataService.ProviderName.Shoko ? series.Cast<ISeries>() : Enumerable.Empty<ISeries>()));
+        => Stub.Of<IMetadataService>(("GetAllShokoSeries", _ => series));
 
     /// <summary>
     /// A shoko series backed by an AniDB anime of the same ID, which is all
@@ -237,8 +243,9 @@ internal static class Host
     /// <returns>The series.</returns>
     public static IShokoSeries ShokoSeries(int seriesId)
         => Stub.Of<IShokoSeries>(
-            ("ID", _ => seriesId),
-            ("AnidbAnime", _ => Stub.Of<IAnidbAnime>(("ID", _ => seriesId)))
+            ("ID", _ => new MetadataGuid(MetadataSource.Shoko, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture))),
+            ("LocalID", _ => seriesId),
+            ("AnidbAnime", _ => Stub.Of<IAnidbAnime>(("ID", _ => new MetadataGuid(MetadataSource.AniDB, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture)))))
         );
 }
 
