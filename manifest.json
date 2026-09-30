@@ -16,6 +16,22 @@
   ],
   "releases": [
     {
+      "version": "1.0.1",
+      "tag": "v1.0.1",
+      "released_at": "2026-09-30T16:38:10.9884148Z",
+      "channel": "Stable",
+      "release_notes": "Rebuilt against the metadata redesign in the abstractions \u00606.0.0-alpha.95\u0060 release. Series and episodes now carry a \u0060MetadataGuid\u0060 as their ID, so the plugin reads the AniDB anime ID from it and links the airings it writes to episodes by that ID. Schedules from AnimeSchedule.net are fetched and written as before.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.95\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule/releases/download/v1.0.1/AnimeSchedule.net-v1.0.1-any.zip",
+          "checksum": "sha256:b4e08ab2bf78697275808339956474eace12a1fea41d37cde9946f282ed4baad"
+        }
+      ]
+    },
+    {
       "version": "1.0.0",
       "tag": "v1.0.0",
       "released_at": "2026-09-18T04:19:07.3980862Z",
