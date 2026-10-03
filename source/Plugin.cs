@@ -16,6 +16,16 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// </remarks>
 public class Plugin : IPlugin, IPluginServiceRegistration
 {
+    /// <summary>
+    /// The embedded resource of the plugin's thumbnail.
+    /// </summary>
+    internal const string ThumbnailResourceName = "Shoko.Plugin.AnimeSchedule.Assets.thumbnail.svg";
+
+    /// <summary>
+    /// The embedded resource of the plugin's icon.
+    /// </summary>
+    internal const string IconResourceName = "Shoko.Plugin.AnimeSchedule.Assets.icon.svg";
+
     /// <inheritdoc/>
     public Guid ID { get; private init; } = new("a92b3752-688a-408f-a03a-bad24718449a");
 
@@ -29,6 +39,12 @@ public class Plugin : IPlugin, IPluginServiceRegistration
         AnimeSchedule.net application token. Data is provided by
         AnimeSchedule.net.
     """;
+
+    /// <inheritdoc/>
+    public string? EmbeddedThumbnailResourceName => ThumbnailResourceName;
+
+    /// <inheritdoc/>
+    public string? EmbeddedIconResourceName => IconResourceName;
 
     /// <inheritdoc/>
     public static void RegisterServices(IServiceCollection serviceCollection, IApplicationPaths applicationPaths)
