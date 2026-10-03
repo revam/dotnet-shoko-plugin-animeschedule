@@ -16,6 +16,22 @@
   ],
   "releases": [
     {
+      "version": "1.0.2",
+      "tag": "v1.0.2",
+      "released_at": "2026-10-03T16:54:40.6110889Z",
+      "channel": "Stable",
+      "release_notes": "Rebuilt against the abstractions \u00606.0.0-alpha.98\u0060 release. Schedules from AnimeSchedule.net are fetched and written as before. The plugin also has its own icon and thumbnail now.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.98\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule/releases/download/v1.0.2/AnimeSchedule.net-v1.0.2-any.zip",
+          "checksum": "sha256:062d387e74984a5090ff4e622b817306edb9356bb23b1453f58ac6d456670269"
+        }
+      ]
+    },
+    {
       "version": "1.0.1",
       "tag": "v1.0.1",
       "released_at": "2026-09-30T16:38:10.9884148Z",
