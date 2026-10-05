@@ -292,7 +292,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         {
             var channel = platform.DisplayName is null
                 ? null
-                : _scheduleService.FindOrRegisterChannel(platform.DisplayName, AiringChannelType.Streaming);
+                : _scheduleService.FindOrRegisterChannel(platform.DisplayName, AiringChannelType.Streaming, platform.CountryCode);
 
             var scheduleData = new AiringScheduleData
             {

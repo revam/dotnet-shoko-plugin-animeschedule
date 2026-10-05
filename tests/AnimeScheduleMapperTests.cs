@@ -172,6 +172,26 @@ public class AnimeScheduleMapperTests
         => Assert.Equal(expected, AnimeScheduleMapper.GetPlatformDisplayName(platformKey, apiName));
 
     [Theory]
+    [InlineData("hulu", "US")]
+    [InlineData("crunchyroll", null)]
+    [InlineData("netflix", null)]
+    [InlineData("bilibili", null)]
+    [InlineData("newthing", null)]
+    public void GetPlatformCountryCode_OnlyARegionalServiceHasACountry(string platformKey, string? expected)
+        => Assert.Equal(expected, AnimeScheduleMapper.GetPlatformCountryCode(platformKey));
+
+    [Fact]
+    public void GetPlatforms_CarriesTheCountryOfARegionalService()
+    {
+        var entries = new[] { EntryWith(("hulu", "www.hulu.com/series/one", "Hulu (Dub)"), ("netflix", "www.netflix.com/title/80000603", "Netflix")) };
+
+        var platforms = AnimeScheduleMapper.GetPlatforms(entries);
+
+        Assert.Contains(platforms, p => p.Key == "hulu" && p.DisplayName == "Hulu" && p.CountryCode == "US");
+        Assert.Contains(platforms, p => p.Key == "netflix" && p.CountryCode == null);
+    }
+
+    [Theory]
     [InlineData("newthing", "New Thing (Sub)", "New Thing")]
     [InlineData("newthing", "New Thing", "New Thing")]
     [InlineData("newthing", "", "newthing")]

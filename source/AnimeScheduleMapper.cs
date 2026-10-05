@@ -53,6 +53,20 @@ public static class AnimeScheduleMapper
     };
 
     /// <summary>
+    /// The country of each known platform that is a regional service, keyed
+    /// like <see cref="KnownPlatformNames"/>. Every other platform is global
+    /// or unknown, and its channel is registered without a country.
+    /// </summary>
+    /// <remarks>
+    /// AnimeSchedule.net lists English-language releases, so its Hulu is the
+    /// US service. Its Bilibili TV is the international one.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> RegionalPlatformCountries = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["hulu"] = "US",
+    };
+
+    /// <summary>
     /// The air type suffixes AnimeSchedule.net appends to a platform's
     /// display name when it tracks that platform per air type.
     /// </summary>
@@ -61,10 +75,10 @@ public static class AnimeScheduleMapper
     /// <summary>
     /// One resolved streaming platform for a schedule: its key (for the
     /// schedule's identity, and <c>null</c> for the channel-less fallback),
-    /// its display name (for <c>FindOrRegisterChannel</c>), and the URL to
-    /// carry on the schedule.
+    /// its display name and country (for <c>FindOrRegisterChannel</c>), and
+    /// the URL to carry on the schedule.
     /// </summary>
-    public readonly record struct PlatformLink(string? Key, string? DisplayName, string? Url);
+    public readonly record struct PlatformLink(string? Key, string? DisplayName, string? Url, string? CountryCode = null);
 
     /// <summary>
     /// The single channel-less platform, used when an anime has no known
@@ -157,6 +171,14 @@ public static class AnimeScheduleMapper
     }
 
     /// <summary>
+    /// Resolves the country to register a platform's channel under: the
+    /// country of a regional service, and <c>null</c> for a global or unknown
+    /// one.
+    /// </summary>
+    public static string? GetPlatformCountryCode(string platformKey)
+        => RegionalPlatformCountries.TryGetValue(platformKey, out var countryCode) ? countryCode : null;
+
+    /// <summary>
     /// Resolves every streaming platform referenced by any of the given
     /// entries (typically the current and next week's entries for one air
     /// type), keeping the most recently seen URL per platform. Entries are
@@ -179,7 +201,7 @@ public static class AnimeScheduleMapper
                     continue;
 
                 var key = stream.Platform.Trim().ToLowerInvariant();
-                byKey[key] = new PlatformLink(key, GetPlatformDisplayName(key, stream.Name), url);
+                byKey[key] = new PlatformLink(key, GetPlatformDisplayName(key, stream.Name), url, GetPlatformCountryCode(key));
             }
 
         if (byKey.Count == 0)
