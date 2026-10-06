@@ -16,6 +16,22 @@
   ],
   "releases": [
     {
+      "version": "1.1.0",
+      "tag": "v1.1.0",
+      "released_at": "2026-10-06T21:28:12.5479414Z",
+      "channel": "Stable",
+      "release_notes": "Airings are now stored by their episode number, so the server links them to the episode itself, including episodes it doesn\u0027t list yet. Hulu is registered in the US; every other platform is global.\n\nRebuilt against the abstractions \u00606.0.0-alpha.99\u0060 release.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.99\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule/releases/download/v1.1.0/AnimeSchedule.net-v1.1.0-any.zip",
+          "checksum": "sha256:bfff56c924aff4f3c97113a31cf30c6e27d9346d6b1688f171b5813f4140f9a2"
+        }
+      ]
+    },
+    {
       "version": "1.0.2",
       "tag": "v1.0.2",
       "released_at": "2026-10-03T16:54:40.6110889Z",
