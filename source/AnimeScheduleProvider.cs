@@ -10,7 +10,6 @@ using Shoko.Abstractions.Config;
 using Shoko.Abstractions.Metadata;
 using Shoko.Abstractions.Metadata.Airing;
 using Shoko.Abstractions.Metadata.Anidb;
-using Shoko.Abstractions.Metadata.Enums;
 using Shoko.Abstractions.Metadata.Services;
 using Shoko.Abstractions.Metadata.Shoko;
 using Shoko.Plugin.AnimeSchedule.Api;
@@ -318,7 +317,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
                 continue;
             }
 
-            WriteAiringsForSchedule(series, schedule, entries, window);
+            WriteAiringsForSchedule(schedule, entries, window);
         }
     }
 
@@ -326,12 +325,10 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     /// Writes the airings one schedule takes from this week's and next week's
     /// entries, and links the episodes a single release covers together.
     /// </summary>
-    /// <param name="series">The series the schedule is for.</param>
     /// <param name="schedule">The schedule to write to.</param>
     /// <param name="entries">The entries to write.</param>
     /// <param name="window">The stretch of time the entries cover, in UTC.</param>
     private void WriteAiringsForSchedule(
-        ISeries series,
         IAiringSchedule schedule,
         IReadOnlyList<AnimeScheduleTimetableEntry> entries,
         (DateTime FromUtc, DateTime ToUtc) window
@@ -339,26 +336,19 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     {
         var airingData = new List<EpisodeAiringData>();
         var linkGroups = new List<IReadOnlyList<int>>();
-        var episodeByNumber = new Dictionary<int, IEpisode>();
 
         foreach (var (entry, numbers) in AnimeScheduleMapper.ResolveEpisodeOwnership(entries))
         {
-            if (numbers.Count > 1)
-                linkGroups.Add(numbers);
+            // The schedule's line runs from episode one to the anime's
+            // episode total, when known; a number outside it is refused.
+            var onLine = numbers
+                .Where(number => number >= 1 && (schedule.LastEpisodeNumber is not { } last || number <= last))
+                .ToList();
+            if (onLine.Count > 1)
+                linkGroups.Add(onLine);
 
-            foreach (var number in numbers)
-            {
-                if (!episodeByNumber.TryGetValue(number, out var episode))
-                {
-                    episode = FindEpisode(series, number);
-                    if (episode is null)
-                        continue;
-
-                    episodeByNumber[number] = episode;
-                }
-
-                airingData.Add(AnimeScheduleMapper.MapAiring(entry, episode));
-            }
+            foreach (var number in onLine)
+                airingData.Add(AnimeScheduleMapper.MapAiring(entry, number));
         }
 
         if (airingData.Count == 0)
@@ -382,9 +372,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         foreach (var group in linkGroups)
         {
             var toLink = group
-                .Select(number => episodeByNumber.GetValueOrDefault(number))
-                .Where(episode => episode is not null)
-                .Select(episode => result.FirstOrDefault(a => a.EpisodeID == episode!.ID))
+                .Select(number => result.FirstOrDefault(airing => airing.SequenceNumber == number))
                 .Where(airing => airing is not null)
                 .Select(airing => airing!)
                 .ToList();
@@ -459,9 +447,6 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         IShokoSeries shokoSeries => shokoSeries.AnidbAnime,
         _ => null,
     };
-
-    private static IEpisode? FindEpisode(ISeries series, int episodeNumber)
-        => series.Episodes.FirstOrDefault(e => e.Type == EpisodeType.Episode && e.EpisodeNumber == episodeNumber);
 
     #endregion
 }

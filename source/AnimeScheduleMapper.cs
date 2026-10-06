@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using Shoko.Abstractions.Metadata;
 using Shoko.Abstractions.Metadata.Airing;
 using Shoko.Plugin.AnimeSchedule.Api;
 
@@ -330,18 +329,20 @@ public static class AnimeScheduleMapper
 
     /// <summary>
     /// Maps one timetable entry, for one of the episodes it covers, to the
-    /// airing data submitted to <c>SetAirings</c>.
+    /// airing data submitted to <c>MergeAirings</c>. AnimeSchedule.net's
+    /// episode number is the airing's place on the schedule's line, which
+    /// starts at episode one, and the core resolves the episode from it.
     /// </summary>
-    public static EpisodeAiringData MapAiring(AnimeScheduleTimetableEntry entry, IEpisode episode)
+    public static EpisodeAiringData MapAiring(AnimeScheduleTimetableEntry entry, int episodeNumber)
     {
         var (airedAt, originalAiredAt, isDelayed) = ResolveTiming(entry);
         return new EpisodeAiringData
         {
-            Episode = episode,
+            SequenceNumber = episodeNumber,
             AiredAt = airedAt,
             OriginalAiredAt = originalAiredAt,
             IsDelayed = isDelayed,
-            Key = episode.EpisodeNumber.ToString(CultureInfo.InvariantCulture),
+            Key = episodeNumber.ToString(CultureInfo.InvariantCulture),
         };
     }
 
