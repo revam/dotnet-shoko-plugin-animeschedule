@@ -6,7 +6,7 @@
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
         <Title>Shoko AnimeSchedule.net</Title>
         <Authors>revam</Authors>
-        <Version>1.0.2</Version>
+        <Version>1.1.0</Version>
         <Configurations>Debug;Release</Configurations>
         <Platforms>AnyCPU;x64</Platforms>
         <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
