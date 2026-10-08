@@ -26,7 +26,7 @@
     tests run against exactly the contract it was built for.
   -->
   <ItemGroup>
-    <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.99" />
+    <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.100" />
   </ItemGroup>
 
   <ItemGroup>

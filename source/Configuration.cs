@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using Shoko.Abstractions.Config;
-using Shoko.Abstractions.Metadata.Airing;
 
 namespace Shoko.Plugin.AnimeSchedule;
 
