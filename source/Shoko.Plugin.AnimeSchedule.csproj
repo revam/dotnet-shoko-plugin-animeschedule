@@ -19,7 +19,7 @@
         assets are referenced here.
     -->
     <ItemGroup>
-        <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.106" ExcludeAssets="runtime" />
+        <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.107" ExcludeAssets="runtime" />
         <!-- The server already loads Entity Framework Core and SQLite and
              configures the plugin's database, so they are referenced for
              compiling only. The version is the server's. -->
