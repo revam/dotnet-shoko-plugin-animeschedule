@@ -369,4 +369,92 @@ public static class AnimeScheduleMapper
         var from = DateTime.SpecifyKind(ISOWeek.ToDateTime(year, week, DayOfWeek.Monday), DateTimeKind.Utc);
         return (from, from.AddDays(14));
     }
+
+    /// <summary>
+    /// Reads the air type back out of a schedule key built by
+    /// <see cref="BuildScheduleKey"/>.
+    /// </summary>
+    /// <param name="key">The schedule key.</param>
+    /// <returns>The air type, or <c>null</c> when the key is not one of ours.</returns>
+    public static AnimeScheduleAirType? GetAirTypeFromScheduleKey(string? key)
+    {
+        var separator = key?.IndexOf(':', StringComparison.Ordinal) ?? -1;
+        if (separator <= 0)
+            return null;
+
+        return Enum.TryParse<AnimeScheduleAirType>(key![..separator], ignoreCase: true, out var airType) && Enum.IsDefined(airType)
+            ? airType
+            : null;
+    }
+
+    /// <summary>
+    /// Reads the numeric anime ID out of a link to an anime page, as
+    /// AnimeSchedule.net sends it: <c>anidb.net/anime/69</c>,
+    /// <c>anilist.co/anime/21/One-Piece</c>, with or without a scheme. An
+    /// AniDB link of the old <c>?aid=69</c> form is read too.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    /// <returns>The ID, or <c>null</c> when the link holds none.</returns>
+    public static int? ParseAnimeLinkID(string? link)
+    {
+        if (string.IsNullOrWhiteSpace(link))
+            return null;
+
+        var span = link.AsSpan().Trim();
+        var start = span.IndexOf("aid=", StringComparison.OrdinalIgnoreCase);
+        if (start >= 0)
+        {
+            start += "aid=".Length;
+        }
+        else
+        {
+            start = span.IndexOf("/anime/", StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+                return null;
+
+            start += "/anime/".Length;
+        }
+
+        var digits = span[start..];
+        var length = 0;
+        while (length < digits.Length && char.IsAsciiDigit(digits[length]))
+            length++;
+
+        return length > 0 && int.TryParse(digits[..length], NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id > 0
+            ? id
+            : null;
+    }
+
+    /// <summary>
+    /// The catalog entry of an anime from a list or a lookup.
+    /// </summary>
+    /// <param name="anime">The anime.</param>
+    /// <param name="seenAt">When it was seen, in UTC.</param>
+    /// <returns>The entry.</returns>
+    public static Storage.CatalogEntry ToCatalogEntry(AnimeScheduleAnimeInfo anime, DateTime seenAt)
+        => new()
+        {
+            Route = anime.Route,
+            AnidbID = ParseAnimeLinkID(anime.Websites?.Anidb),
+            AnilistID = ParseAnimeLinkID(anime.Websites?.AniList),
+            MalID = ParseAnimeLinkID(anime.Websites?.Mal),
+            Title = anime.Title,
+            Status = anime.Status,
+            Episodes = anime.Episodes is > 0 ? anime.Episodes : null,
+            LastSeenAt = seenAt,
+        };
+
+    /// <summary>
+    /// What the writes need to know of an anime, from its catalog entry.
+    /// </summary>
+    /// <param name="entry">The catalog entry.</param>
+    /// <returns>The anime.</returns>
+    public static AnimeScheduleAnimeInfo ToAnimeInfo(Storage.CatalogEntry entry)
+        => new()
+        {
+            Route = entry.Route,
+            Title = entry.Title,
+            Status = entry.Status,
+            Episodes = entry.Episodes,
+        };
 }

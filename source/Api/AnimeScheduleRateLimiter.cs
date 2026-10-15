@@ -3,6 +3,8 @@ using System.Linq;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Shoko.Abstractions.Connectivity.Suspensions;
 
 namespace Shoko.Plugin.AnimeSchedule.Api;
 
@@ -26,14 +28,55 @@ namespace Shoko.Plugin.AnimeSchedule.Api;
 /// <see cref="Api.AnimeScheduleApiClient"/> only ever has one request in
 /// flight at a time (guarded by <see cref="WaitAsync"/>'s semaphore), so a
 /// burst before the first response is not possible from this client alone.
+///
+/// Requests are also spaced <see cref="MinimumInterval"/> apart, about half
+/// the rate AnimeSchedule.net allows, and the limiter keeps the suspension
+/// the client reports for a rate limit or a run of server errors.
 /// </remarks>
-public sealed class AnimeScheduleRateLimiter
+/// <param name="reporter">Reports the suspensions to the server, or <c>null</c>.</param>
+/// <param name="logger">The logger, or <c>null</c>.</param>
+public sealed class AnimeScheduleRateLimiter(
+    ISuspensionReporter<AnimeScheduleSuspensionProvider>? reporter = null,
+    ILogger<AnimeScheduleRateLimiter>? logger = null
+)
 {
+    /// <summary>
+    /// How many server errors in a row suspend the service.
+    /// </summary>
+    public const int ServerErrorsToSuspend = 3;
+
+    /// <summary>
+    /// How long a run of server errors suspends the service.
+    /// </summary>
+    public static readonly TimeSpan ServerErrorSuspension = TimeSpan.FromMinutes(15);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly object _stateLock = new();
+    private readonly Lock _stateLock = new();
 
     private int? _remaining;
     private DateTimeOffset? _resetAt;
+    private DateTimeOffset? _lastRequestAt;
+    private DateTimeOffset? _suspendedUntil;
+    private int _serverErrors;
+
+    /// <summary>
+    /// The least time between two requests. One second, so about 60 requests
+    /// a minute against AnimeSchedule.net's 120.
+    /// </summary>
+    internal TimeSpan MinimumInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// When the current suspension ends, in UTC, or <c>null</c> when requests
+    /// may be sent.
+    /// </summary>
+    public DateTimeOffset? SuspendedUntil
+    {
+        get
+        {
+            lock (_stateLock)
+                return _suspendedUntil is { } until && until > DateTimeOffset.UtcNow ? until : null;
+        }
+    }
 
     /// <summary>
     /// Waits until it is safe to send another request, then reserves a slot
@@ -47,7 +90,12 @@ public sealed class AnimeScheduleRateLimiter
         {
             TimeSpan delay;
             lock (_stateLock)
-                delay = ComputeDelay(_remaining, _resetAt, DateTimeOffset.UtcNow);
+            {
+                var now = DateTimeOffset.UtcNow;
+                delay = ComputeDelay(_remaining, _resetAt, now);
+                if (_lastRequestAt is { } last && last + MinimumInterval - now is { Ticks: > 0 } spacing && spacing > delay)
+                    delay = spacing;
+            }
 
             if (delay > TimeSpan.Zero)
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
@@ -59,6 +107,7 @@ public sealed class AnimeScheduleRateLimiter
             {
                 if (_remaining is > 0)
                     _remaining--;
+                _lastRequestAt = DateTimeOffset.UtcNow;
             }
         }
         finally
@@ -83,6 +132,80 @@ public sealed class AnimeScheduleRateLimiter
                 _resetAt = resetAt;
         }
     }
+
+    #region Suspensions
+
+    /// <summary>
+    /// A request succeeded, which ends a run of server errors.
+    /// </summary>
+    public void NotifySuccess()
+    {
+        lock (_stateLock)
+            _serverErrors = 0;
+    }
+
+    /// <summary>
+    /// AnimeSchedule.net answered with a server error. The
+    /// <see cref="ServerErrorsToSuspend"/>th in a row suspends the service
+    /// for <see cref="ServerErrorSuspension"/>.
+    /// </summary>
+    /// <returns>When the suspension ends, or <c>null</c> when this error did not suspend.</returns>
+    public DateTimeOffset? NotifyServerError()
+    {
+        lock (_stateLock)
+        {
+            if (++_serverErrors < ServerErrorsToSuspend)
+                return null;
+
+            _serverErrors = 0;
+        }
+
+        var until = DateTimeOffset.UtcNow + ServerErrorSuspension;
+        Suspend(SuspensionKind.ServerErrors, until);
+        return until;
+    }
+
+    /// <summary>
+    /// AnimeSchedule.net limited the rate again after the one retry, which
+    /// suspends the service until the given time.
+    /// </summary>
+    /// <param name="until">When the limit lifts, in UTC.</param>
+    public void NotifyRateLimited(DateTimeOffset until)
+        => Suspend(SuspensionKind.RateLimited, until);
+
+    /// <summary>
+    /// Keeps the suspension and reports it to the server. The server clears
+    /// it once its end passes, so nothing resumes it here.
+    /// </summary>
+    /// <param name="kind">Why the service is suspended.</param>
+    /// <param name="until">When the suspension ends, in UTC.</param>
+    private void Suspend(SuspensionKind kind, DateTimeOffset until)
+    {
+        lock (_stateLock)
+        {
+            if (_suspendedUntil is not { } current || current < until)
+                _suspendedUntil = until;
+        }
+
+        logger?.LogInformation(
+            "AnimeSchedule.net is suspended ({Kind}) until {ResumesAt:u}; the plugin sends no requests until then.",
+            kind,
+            until
+        );
+        if (reporter is null)
+            return;
+
+        try
+        {
+            reporter.Suspend(kind, resumesAt: until.UtcDateTime);
+        }
+        catch (InvalidOperationException ex)
+        {
+            logger?.LogWarning(ex, "Could not report the AnimeSchedule.net {Kind} suspension.", kind);
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Parses AnimeSchedule.net's rate limit headers. Pulled out as a pure,

@@ -1,8 +1,11 @@
 using System;
 using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Shoko.Abstractions.Connectivity.Suspensions;
 using Shoko.Abstractions.Plugin;
 using Shoko.Plugin.AnimeSchedule.Api;
+using Shoko.Plugin.AnimeSchedule.Storage;
 
 namespace Shoko.Plugin.AnimeSchedule;
 
@@ -52,7 +55,14 @@ public class Plugin : IPlugin<Configuration>, IPluginServiceRegistration
         // The provider itself is not registered: the server finds it by
         // reflection, constructs it with these services, and sweeps that very
         // instance, so nothing here needs a reference to it.
-        serviceCollection.AddSingleton<AnimeScheduleRateLimiter>();
+        // The server migrates the database at its late start, and hands out
+        // no context before then, so nothing reads it during setup.
+        serviceCollection.AddPluginDbContext<Plugin, AnimeScheduleDbContext>(AnimeScheduleDbContext.DatabaseName);
+        serviceCollection.AddSingleton<AnimeScheduleStore>();
+        serviceCollection.AddSingleton(provider => new AnimeScheduleRateLimiter(
+            provider.GetService<ISuspensionReporter<AnimeScheduleSuspensionProvider>>(),
+            provider.GetService<ILogger<AnimeScheduleRateLimiter>>()
+        ));
         // The contact URL is read back from the plugin's own registered info
         // rather than written here, so it names wherever this build was
         // published from instead of hard-coding one host into the source. A

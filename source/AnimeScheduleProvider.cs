@@ -10,25 +10,28 @@ using Shoko.Abstractions.Config;
 using Shoko.Abstractions.Metadata;
 using Shoko.Abstractions.Metadata.Airing;
 using Shoko.Abstractions.Metadata.Anidb;
+using Shoko.Abstractions.Metadata.CrossReferences;
 using Shoko.Abstractions.Metadata.Services;
 using Shoko.Abstractions.Metadata.Shoko;
+using Shoko.Abstractions.Metadata.Storage;
 using Shoko.Plugin.AnimeSchedule.Api;
+using Shoko.Plugin.AnimeSchedule.Storage;
 
 namespace Shoko.Plugin.AnimeSchedule;
 
 /// <summary>
 /// Airing schedule provider backed by AnimeSchedule.net. Keys series by their
-/// AniDB anime ID (looked up against AnimeSchedule.net's own <c>route</c>
+/// AniDB anime ID (matched against AnimeSchedule.net's own <c>route</c>
 /// slug), and reports raw, sub and dub airings as separate tracked schedules,
 /// one per streaming platform.
 /// </summary>
 /// <remarks>
 /// <para>
 /// AnimeSchedule.net's API terms require visible credit; the plugin's
-/// <see cref="Plugin.Description"/> and README carry that attribution. This
-/// provider keeps no database of its own: everything it knows is re-derived
-/// from the API on every refresh, with only short-lived in-memory caching to
-/// avoid redundant calls within a single sweep.
+/// <see cref="Plugin.Description"/> and README carry that attribution. The
+/// plugin keeps a catalog of the anime AnimeSchedule.net lists as ongoing or
+/// upcoming, and the lookup state of each AniDB anime, in a database of its
+/// own, so a sweep asks only about the few anime the catalog does not cover.
 /// </para>
 /// <para>
 /// A timetable covers one week, so a write only ever knows about this week
@@ -40,27 +43,43 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// </remarks>
 public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuration>, ISweepingAiringScheduleProvider
 {
-    private static readonly TimeSpan AnimeInfoTtl = TimeSpan.FromHours(6);
-    private static readonly TimeSpan AnimeInfoNegativeTtl = TimeSpan.FromHours(1);
     private static readonly TimeSpan TimetableTtl = TimeSpan.FromMinutes(5);
+
+    private static readonly TimeSpan UpcomingListInterval = TimeSpan.FromDays(1);
+
+    private static readonly TimeSpan CatalogRetention = TimeSpan.FromDays(60);
 
     private readonly AnimeScheduleApiClient _apiClient;
     private readonly IAiringScheduleService _scheduleService;
     private readonly IMetadataService _metadataService;
+    private readonly IMetadataCrossReferenceStore _crossReferences;
+    private readonly AnimeScheduleStore _store;
     private readonly ConfigurationProvider<Configuration> _configurationProvider;
     private readonly ILogger<AnimeScheduleProvider> _logger;
 
-    private readonly ConcurrentDictionary<int, (AnimeScheduleAnimeInfo? Info, DateTimeOffset ExpiresAt)> _animeCache = new();
     private readonly ConcurrentDictionary<(AnimeScheduleAirType AirType, int Year, int Week), (IReadOnlyList<AnimeScheduleTimetableEntry> Entries, DateTimeOffset ExpiresAt)> _timetableCache = new();
+
+    private readonly Lock _upcomingLock = new();
+
+    private DateTime? _upcomingListedAt;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AnimeScheduleProvider"/>
     /// class.
     /// </summary>
+    /// <param name="apiClient">The AnimeSchedule.net client.</param>
+    /// <param name="scheduleService">The server's airing schedules.</param>
+    /// <param name="metadataService">The server's metadata, for the library's series.</param>
+    /// <param name="crossReferences">The links between AniDB anime and other sources.</param>
+    /// <param name="store">The plugin's own database.</param>
+    /// <param name="configurationProvider">The plugin's configuration.</param>
+    /// <param name="logger">The logger.</param>
     public AnimeScheduleProvider(
         AnimeScheduleApiClient apiClient,
         IAiringScheduleService scheduleService,
         IMetadataService metadataService,
+        IMetadataCrossReferenceStore crossReferences,
+        AnimeScheduleStore store,
         ConfigurationProvider<Configuration> configurationProvider,
         ILogger<AnimeScheduleProvider> logger
     )
@@ -68,6 +87,8 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         _apiClient = apiClient;
         _scheduleService = scheduleService;
         _metadataService = metadataService;
+        _crossReferences = crossReferences;
+        _store = store;
         _configurationProvider = configurationProvider;
         _logger = logger;
     }
@@ -92,7 +113,14 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
 
     #region Refreshing
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Refreshes one series: matches it against the catalog, looks it up
+    /// when the catalog does not cover it and it could be airing, whenever
+    /// its next lookup is due or not, and writes its airings.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    /// <param name="cancellationToken">Cancels the refresh.</param>
+    /// <returns><c>true</c> when AnimeSchedule.net knows the series.</returns>
     public async Task<bool> RefreshAsync(ISeries series, CancellationToken cancellationToken = default)
     {
         var anidbAnime = ResolveAnidbAnime(series);
@@ -105,36 +133,30 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             return false;
         }
 
-        var animeInfo = await ResolveAnimeInfoAsync(anidbAnimeId, cancellationToken).ConfigureAwait(false);
-        if (animeInfo is null)
+        if (_apiClient.SuspendedUntil is { } suspendedUntil)
         {
-            _logger.LogDebug("AnimeSchedule.net does not know AniDB anime {AnimeID}.", anidbAnimeId);
+            _logger.LogDebug("Skipping AnimeSchedule.net refresh for AniDB anime {AnimeID}: suspended until {ResumesAt:u}.", anidbAnimeId, suspendedUntil);
             return false;
         }
 
         var now = DateTime.UtcNow;
-        var (year, week) = AnimeScheduleMapper.GetIsoWeek(now);
-        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(now.AddDays(7));
-        var window = AnimeScheduleMapper.GetTimetableWindow(now);
-
-        foreach (var airType in AnimeScheduleMapper.AllAirTypes)
+        var stats = new SweepStats();
+        try
         {
-            var current = await GetTimetableCachedAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
-            var next = await GetTimetableCachedAsync(airType, nextYear, nextWeek, cancellationToken).ConfigureAwait(false);
+            var catalog = new CatalogIndex(_store.GetCatalog());
+            var plan = PlanSeries(series, catalog, _store.GetLookup(anidbAnimeId), now, ignoreNextCheck: true);
+            await LookUpAsync([plan], now, stats, cancellationToken).ConfigureAwait(false);
+            SaveLookups([plan]);
 
-            var matching = current
-                .Concat(next)
-                .Where(e => string.Equals(e.Route, animeInfo.Route, StringComparison.Ordinal))
-                .OrderBy(e => e.EpisodeDate)
-                .ToList();
-
-            if (matching.Count == 0)
-                continue;
-
-            ApplyAirType(series, animeInfo, airType, matching, window);
+            var timetables = await LoadTimetablesAsync(now, cancellationToken).ConfigureAwait(false);
+            Write(plan, timetables, GetOwnSchedules(), AnimeScheduleMapper.GetTimetableWindow(now));
+            return plan.Route is not null;
         }
-
-        return true;
+        catch (AnimeScheduleUnavailableException ex)
+        {
+            _logger.LogDebug("Stopped the AnimeSchedule.net refresh for AniDB anime {AnimeID}: suspended until {ResumesAt:u}.", anidbAnimeId, ex.ResumesAt);
+            return false;
+        }
     }
 
     #endregion
@@ -150,7 +172,15 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     /// </summary>
     public TimeSpan? SuggestedSweepInterval => TimeSpan.FromMinutes(30);
 
-    /// <inheritdoc/>
+    /// <summary>
+    /// Runs one chunk of a sweep. A pass starts by refreshing the catalog,
+    /// then walks the library's series by shoko series ID, looking up at most
+    /// <see cref="AnimeScheduleApiClient.PageSize"/> uncovered anime per
+    /// request, and writing each series' airings from the timetables.
+    /// </summary>
+    /// <param name="cursor">The shoko series ID the last chunk finished at, or <c>null</c> for a new pass.</param>
+    /// <param name="cancellationToken">Fires at the chunk's deadline.</param>
+    /// <returns>Where the next chunk resumes, or <c>null</c> when the pass is over.</returns>
     public async Task<string?> SweepAsync(string? cursor, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_configurationProvider.Load().AppToken))
@@ -159,87 +189,160 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             return null;
         }
 
-        var after = ParseCursor(cursor);
-        var series = _metadataService.GetAllShokoSeries()
-            .Where(entry => entry.LocalID > after)
-            .OrderBy(entry => entry.LocalID)
-            .ToList();
-        if (series.Count == 0)
+        if (_apiClient.SuspendedUntil is { } suspendedUntil)
         {
-            _logger.LogDebug("The sweep found no series after shoko series {SeriesID}, and has come full circle.", after);
+            _logger.LogDebug("Skipping the AnimeSchedule.net sweep: suspended until {ResumesAt:u}.", suspendedUntil);
             return null;
         }
 
+        var after = ParseCursor(cursor);
         var now = DateTime.UtcNow;
-        var (year, week) = AnimeScheduleMapper.GetIsoWeek(now);
-        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(now.AddDays(7));
-
-        // Fill the shared timetable cache with one round-trip per air type
-        // per week, so the per-series refreshes below make no timetable
-        // requests of their own. Six requests, whatever the library's size.
+        var stats = new SweepStats();
         try
         {
-            foreach (var airType in AnimeScheduleMapper.AllAirTypes)
+            if (cursor is null)
+                await RefreshCatalogAsync(now, cancellationToken).ConfigureAwait(false);
+
+            var series = _metadataService.GetAllShokoSeries()
+                .Where(entry => entry.LocalID > after)
+                .OrderBy(entry => entry.LocalID)
+                .ToList();
+            if (series.Count == 0)
             {
-                await GetTimetableCachedAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
-                await GetTimetableCachedAsync(airType, nextYear, nextWeek, cancellationToken).ConfigureAwait(false);
+                _logger.LogDebug("The sweep found no series after shoko series {SeriesID}, and has come full circle.", after);
+                return null;
             }
+
+            var timetables = await LoadTimetablesAsync(now, cancellationToken).ConfigureAwait(false);
+            var catalog = new CatalogIndex(_store.GetCatalog());
+            var lookups = _store.GetLookups();
+            var schedules = GetOwnSchedules();
+            var window = AnimeScheduleMapper.GetTimetableWindow(now);
+            stats.CatalogSize = catalog.Count;
+
+            var index = 0;
+            while (index < series.Count)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                // A block runs up to the series that fills one lookup request,
+                // so every lookup asks for as many anime as a page holds.
+                var block = new List<SeriesPlan>();
+                var pending = 0;
+                while (index < series.Count && pending < AnimeScheduleApiClient.PageSize)
+                {
+                    var plan = PlanSeries(series[index++], catalog, null, now, ignoreNextCheck: false, lookups);
+                    block.Add(plan);
+                    if (plan.NeedsLookup)
+                        pending++;
+                }
+
+                await LookUpAsync(block, now, stats, cancellationToken).ConfigureAwait(false);
+                foreach (var plan in block.Where(plan => plan.Lookup is not null))
+                    lookups[plan.AnidbID] = plan.Lookup!;
+                SaveLookups(block);
+
+                foreach (var plan in block)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var seriesId = ((IShokoSeries)plan.Series).LocalID;
+                    if (plan.Route is not null)
+                        stats.Matched++;
+
+                    try
+                    {
+                        if (Write(plan, timetables, schedules, window))
+                            stats.Written++;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        // One series the server refuses is not worth stalling
+                        // the walk over; the cursor moves past it either way.
+                        _logger.LogWarning(ex, "The AnimeSchedule.net sweep failed for shoko series {SeriesID}.", seriesId);
+                    }
+
+                    after = seriesId;
+                }
+            }
+
+            LogSummary(stats, "has come full circle");
+            return null;
         }
         catch (OperationCanceledException)
         {
-            return ResumeAfter(after, 0);
+            // Hand back the ground covered, rather than ending as a timeout
+            // that would walk these series again from the old cursor.
+            LogSummary(stats, $"ran out of budget; the next chunk resumes after shoko series {after}");
+            return FormatCursor(after);
         }
-
-        var swept = 0;
-        foreach (var oneSeries in series)
+        catch (AnimeScheduleUnavailableException ex)
         {
-            if (cancellationToken.IsCancellationRequested)
-                return ResumeAfter(after, swept);
-
-            try
-            {
-                await RefreshAsync(oneSeries, cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // The budget ran out mid-request. Handing back the ground
-                // already covered beats letting the chunk end as a timeout,
-                // which would walk these series again from the old cursor.
-                return ResumeAfter(after, swept);
-            }
-            catch (Exception ex)
-            {
-                // One series AnimeSchedule.net answers oddly for is not worth
-                // stalling the walk over; the cursor moves past it either way.
-                _logger.LogWarning(ex, "The AnimeSchedule.net sweep failed for shoko series {SeriesID}.", oneSeries.LocalID);
-            }
-
-            after = oneSeries.LocalID;
-            swept++;
-        }
-
-        _logger.LogDebug("The sweep covered the last {Count} series, and has come full circle.", swept);
-        return null;
-
-        string ResumeAfter(int seriesId, int count)
-        {
-            _logger.LogDebug(
-                "The sweep covered {Count} series before running out of budget; the next chunk resumes after shoko series {SeriesID}.",
-                count,
-                seriesId
-            );
-            return FormatCursor(seriesId);
+            LogSummary(stats, $"stopped: AnimeSchedule.net is suspended until {ex.ResumesAt:u}");
+            return null;
         }
     }
 
     /// <summary>
+    /// Refreshes the catalog: the ongoing list every pass, and the upcoming
+    /// list once a day. Each page goes in as it is read, so a pass cut short
+    /// keeps what it got, and the anime not seen for a while are dropped.
+    /// </summary>
+    /// <param name="now">The current time, in UTC.</param>
+    /// <param name="cancellationToken">Cancels the refresh.</param>
+    /// <returns>A task that completes once the catalog is refreshed.</returns>
+    /// <exception cref="AnimeScheduleUnavailableException">AnimeSchedule.net is suspended.</exception>
+    private async Task RefreshCatalogAsync(DateTime now, CancellationToken cancellationToken)
+    {
+        var listed = 0;
+        void Upsert(IReadOnlyList<AnimeScheduleAnimeInfo> anime)
+        {
+            _store.UpsertCatalog(anime.Select(entry => AnimeScheduleMapper.ToCatalogEntry(entry, now)));
+            listed += anime.Count;
+        }
+
+        if (await _apiClient.ListAnimeAsync("ongoing", Upsert, cancellationToken).ConfigureAwait(false))
+            _store.PruneCatalog(now - CatalogRetention);
+
+        bool upcomingDue;
+        lock (_upcomingLock)
+            upcomingDue = _upcomingListedAt is not { } listedAt || now - listedAt >= UpcomingListInterval;
+
+        if (upcomingDue && await _apiClient.ListAnimeAsync("upcoming", Upsert, cancellationToken).ConfigureAwait(false))
+        {
+            lock (_upcomingLock)
+                _upcomingListedAt = now;
+        }
+
+        _logger.LogDebug("Refreshed the AnimeSchedule.net catalog with {Count} listed anime.", listed);
+    }
+
+    /// <summary>
+    /// Writes a summary of the chunk.
+    /// </summary>
+    /// <param name="stats">What the chunk did.</param>
+    /// <param name="ending">How the chunk ended.</param>
+    private void LogSummary(SweepStats stats, string ending)
+        => _logger.LogDebug(
+            "The AnimeSchedule.net sweep chunk {Ending}: {CatalogSize} anime in the catalog, {Matched} series matched, " +
+            "{Lookups} lookups for {LookedUp} anime, {Misses} misses, {GivenUp} given up, {Written} series written.",
+            ending,
+            stats.CatalogSize,
+            stats.Matched,
+            stats.Lookups,
+            stats.LookedUp,
+            stats.Misses,
+            stats.GivenUp,
+            stats.Written
+        );
+
+    /// <summary>
     /// Reads the shoko series ID the last chunk finished at out of the
-    /// cursor. A cursor that cannot be read starts the sweep over rather than
+    /// cursor. A cursor that cannot be read starts the walk over rather than
     /// ending it, since an unreadable cursor says nothing about what has been
     /// covered.
     /// </summary>
     /// <param name="cursor">The cursor the chunk was called with.</param>
-    /// <returns>The shoko series ID to resume after; <c>0</c> starts a fresh sweep.</returns>
+    /// <returns>The shoko series ID to resume after; <c>0</c> starts the walk.</returns>
     private int ParseCursor(string? cursor)
     {
         if (string.IsNullOrEmpty(cursor))
@@ -248,7 +351,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         if (int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out var seriesId))
             return seriesId;
 
-        _logger.LogWarning("Starting a fresh sweep: the cursor \"{Cursor}\" is not a shoko series ID.", cursor);
+        _logger.LogWarning("Starting the walk over: the cursor \"{Cursor}\" is not a shoko series ID.", cursor);
         return 0;
     }
 
@@ -262,7 +365,261 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
 
     #endregion
 
+    #region Matching
+
+    /// <summary>
+    /// Works out how one series is matched: by the catalog, by an earlier
+    /// lookup, or by a lookup still to make. Makes no requests.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    /// <param name="catalog">The catalog.</param>
+    /// <param name="lookup">The series' lookup state, when <paramref name="lookups"/> is not given.</param>
+    /// <param name="now">The current time, in UTC.</param>
+    /// <param name="ignoreNextCheck">Whether to look the anime up even when its next lookup is not due.</param>
+    /// <param name="lookups">Every lookup state, by AniDB anime ID, or <c>null</c>.</param>
+    /// <returns>The plan.</returns>
+    private SeriesPlan PlanSeries(
+        ISeries series,
+        CatalogIndex catalog,
+        AnidbLookup? lookup,
+        DateTime now,
+        bool ignoreNextCheck,
+        IReadOnlyDictionary<int, AnidbLookup>? lookups = null
+    )
+    {
+        var plan = new SeriesPlan(series);
+        var anidbAnime = ResolveAnidbAnime(series);
+        if (anidbAnime is null || !anidbAnime.ID.TryGetNumericID<int>(out var anidbAnimeId))
+            return plan;
+
+        plan.AnidbAnime = anidbAnime;
+        plan.AnidbID = anidbAnimeId;
+        plan.Fingerprint = LookupPolicy.GetFingerprint(anidbAnime.AirDate, anidbAnime.EndDate, anidbAnime.EpisodeCounts.Episodes);
+        var window = LookupPolicy.GetWindow(anidbAnime.AirDate, anidbAnime.EndDate, DateOnly.FromDateTime(now));
+
+        // The MyAnimeList fallback reads the linked AniList entries, so it is
+        // left to the anime that could be airing.
+        plan.Entry = catalog.Match(
+            anidbAnimeId,
+            () => GetAnilistIDs(anidbAnimeId),
+            window is AiringWindow.Open ? () => GetAnilistMalIDs(anidbAnimeId) : null
+        );
+        if (plan.Entry is not null)
+        {
+            plan.Route = plan.Entry.Route;
+            return plan;
+        }
+
+        lookup = lookups is null ? lookup : lookups.GetValueOrDefault(anidbAnimeId);
+        plan.Lookup = lookup;
+        if (lookup is not null && LookupPolicy.ResetIfChanged(lookup, plan.Fingerprint, now))
+            plan.LookupChanged = true;
+
+        if (lookup is { State: LookupState.Known, Route: { } knownRoute })
+        {
+            plan.Route = knownRoute;
+            plan.Entry = catalog.GetByRoute(knownRoute);
+        }
+
+        if (window is not AiringWindow.Open)
+        {
+            if (window is AiringWindow.Ended && lookup is { State: LookupState.Unknown })
+            {
+                LookupPolicy.GiveUp(lookup);
+                plan.LookupChanged = true;
+            }
+
+            return plan;
+        }
+
+        if (lookup is { State: LookupState.GivenUp })
+            return plan;
+
+        plan.NeedsLookup = ignoreNextCheck || LookupPolicy.IsDue(lookup, now);
+        return plan;
+    }
+
+    /// <summary>
+    /// Looks up the anime of the plans that need it, in one request, and
+    /// records each answer. A failed request records nothing, so no anime
+    /// takes a miss for it.
+    /// </summary>
+    /// <param name="plans">The plans; those that need no lookup are passed over.</param>
+    /// <param name="now">The current time, in UTC.</param>
+    /// <param name="stats">Counts what the lookup did.</param>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
+    /// <returns>A task that completes once the answers are recorded.</returns>
+    /// <exception cref="AnimeScheduleUnavailableException">AnimeSchedule.net is suspended.</exception>
+    private async Task LookUpAsync(IReadOnlyList<SeriesPlan> plans, DateTime now, SweepStats stats, CancellationToken cancellationToken)
+    {
+        var pending = plans.Where(plan => plan.NeedsLookup).ToList();
+        if (pending.Count == 0)
+            return;
+
+        stats.Lookups++;
+        stats.LookedUp += pending.Count;
+        var found = await _apiClient.FindAnimeByAnidbIdsAsync([.. pending.Select(plan => plan.AnidbID)], cancellationToken).ConfigureAwait(false);
+        if (found is null)
+            return;
+
+        var entries = found.Select(anime => AnimeScheduleMapper.ToCatalogEntry(anime, now)).ToList();
+        _store.UpsertCatalog(entries);
+        var byAnidb = new Dictionary<int, CatalogEntry>();
+        foreach (var entry in entries)
+        {
+            if (entry.AnidbID is { } anidbID)
+                byAnidb.TryAdd(anidbID, entry);
+        }
+
+        // An answer to a single ID is that anime's, whatever its links say.
+        if (pending.Count == 1 && entries.Count == 1)
+            byAnidb.TryAdd(pending[0].AnidbID, entries[0]);
+
+        foreach (var plan in pending)
+        {
+            var lookup = plan.Lookup ??= new AnidbLookup { AnidbAnimeID = plan.AnidbID };
+            plan.LookupChanged = true;
+            if (byAnidb.TryGetValue(plan.AnidbID, out var entry))
+            {
+                LookupPolicy.RecordHit(lookup, entry.Route, plan.Fingerprint, now);
+                plan.Route = entry.Route;
+                plan.Entry = entry;
+                continue;
+            }
+
+            LookupPolicy.RecordMiss(lookup, plan.Fingerprint, now);
+            plan.Route = null;
+            plan.Entry = null;
+            stats.Misses++;
+            if (lookup.State is LookupState.GivenUp)
+                stats.GivenUp++;
+            _logger.LogTrace("AnimeSchedule.net does not know AniDB anime {AnimeID}.", plan.AnidbID);
+        }
+    }
+
+    /// <summary>
+    /// Stores the lookup states the plans changed.
+    /// </summary>
+    /// <param name="plans">The plans.</param>
+    private void SaveLookups(IEnumerable<SeriesPlan> plans)
+        => _store.SaveLookups(plans.Where(plan => plan.LookupChanged && plan.Lookup is not null).Select(plan => plan.Lookup!));
+
+    /// <summary>
+    /// The AniList anime the AniDB anime is linked to, best link first.
+    /// </summary>
+    /// <param name="anidbAnimeId">The AniDB anime ID.</param>
+    /// <returns>The AniList anime IDs, or an empty list.</returns>
+    private IReadOnlyList<int> GetAnilistIDs(int anidbAnimeId)
+        => [.. GetAnilistLinks(anidbAnimeId).Select(link => link.ProviderID!.TryGetNumericID<int>(out var id) ? id : 0).Where(id => id > 0)];
+
+    /// <summary>
+    /// The MyAnimeList IDs the linked AniList entries give themselves. These
+    /// name one entry each, unlike AniDB's own MyAnimeList links.
+    /// </summary>
+    /// <param name="anidbAnimeId">The AniDB anime ID.</param>
+    /// <returns>The MyAnimeList IDs, or an empty list.</returns>
+    private IReadOnlyList<int> GetAnilistMalIDs(int anidbAnimeId)
+    {
+        var links = GetAnilistLinks(anidbAnimeId);
+        if (links.Count == 0 || !MetadataSource.TryParse("mal", out var malSource))
+            return [];
+
+        var ids = new List<int>();
+        foreach (var link in links)
+        {
+            try
+            {
+                if (link.Provider is not ISeries anilistSeries)
+                    continue;
+
+                foreach (var malID in anilistSeries.GetCrossSourceIDs(malSource))
+                {
+                    if (malID.TryGetNumericID<int>(out var id) && id > 0)
+                        ids.Add(id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogTrace(ex, "Could not read the AniList entry linked to AniDB anime {AnimeID}.", anidbAnimeId);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// The AniDB anime's links to AniList series, best first. Empty when no
+    /// plugin registered the AniList source.
+    /// </summary>
+    /// <param name="anidbAnimeId">The AniDB anime ID.</param>
+    /// <returns>The links.</returns>
+    private IReadOnlyList<IMetadataSeriesCrossReference> GetAnilistLinks(int anidbAnimeId)
+    {
+        // Only a registered source: parsing the value before the AniList
+        // plugin registers it would claim it as an unregistered one.
+        if (!MetadataSource.TryGet("anilist", out var anilistSource))
+            return [];
+
+        return [.. _crossReferences.GetSeriesLinks(anidbAnimeId, anilistSource).Where(link => link.ProviderID is not null).OrderBy(link => link.Ordering)];
+    }
+
+    #endregion
+
     #region Writing
+
+    /// <summary>
+    /// Writes one series: its airings from the timetables when it is matched
+    /// and listed, and the withdrawals on every other schedule of this
+    /// provider it holds. An air type whose timetables failed is left alone.
+    /// </summary>
+    /// <param name="plan">The series' plan.</param>
+    /// <param name="timetables">This week's and next week's entries per air type, <c>null</c> where they failed.</param>
+    /// <param name="schedules">This provider's schedules, by series.</param>
+    /// <param name="window">The stretch of time the timetables cover, in UTC.</param>
+    /// <returns><c>true</c> when anything was written.</returns>
+    private bool Write(
+        SeriesPlan plan,
+        IReadOnlyDictionary<AnimeScheduleAirType, IReadOnlyList<AnimeScheduleTimetableEntry>?> timetables,
+        IReadOnlyDictionary<MetadataGuid, IReadOnlyList<IAiringSchedule>> schedules,
+        (DateTime FromUtc, DateTime ToUtc) window
+    )
+    {
+        var touched = new HashSet<Guid>();
+        if (plan.Route is { } route)
+        {
+            var animeInfo = plan.Entry is { } entry ? AnimeScheduleMapper.ToAnimeInfo(entry) : new AnimeScheduleAnimeInfo { Route = route };
+            foreach (var (airType, entries) in timetables)
+            {
+                if (entries is null)
+                    continue;
+
+                var matching = entries
+                    .Where(e => string.Equals(e.Route, route, StringComparison.Ordinal))
+                    .OrderBy(e => e.EpisodeDate)
+                    .ToList();
+                if (matching.Count > 0)
+                    ApplyAirType(plan.Series, animeInfo, airType, matching, window, touched);
+            }
+        }
+
+        var held = schedules.GetValueOrDefault(plan.Series.ID) ?? [];
+        if (plan.AnidbAnime is { } anidbAnime && schedules.TryGetValue(anidbAnime.ID, out var heldByAnidb))
+            held = [.. held, .. heldByAnidb];
+
+        var withdrew = false;
+        foreach (var schedule in held.DistinctBy(schedule => schedule.ID))
+        {
+            if (touched.Contains(schedule.ID))
+                continue;
+
+            if (AnimeScheduleMapper.GetAirTypeFromScheduleKey(schedule.Key) is not { } airType || timetables.GetValueOrDefault(airType) is null)
+                continue;
+
+            withdrew |= WithdrawUnlisted(schedule, window);
+        }
+
+        return touched.Count > 0 || withdrew;
+    }
 
     /// <summary>
     /// Writes one air type's entries as a schedule per streaming platform,
@@ -273,12 +630,14 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     /// <param name="airType">The air type the entries came from.</param>
     /// <param name="entries">This week's and next week's entries for the anime.</param>
     /// <param name="window">The stretch of time those two weeks cover, in UTC.</param>
+    /// <param name="touched">Takes the ID of every schedule written.</param>
     private void ApplyAirType(
         ISeries series,
         AnimeScheduleAnimeInfo animeInfo,
         AnimeScheduleAirType airType,
         IReadOnlyList<AnimeScheduleTimetableEntry> entries,
-        (DateTime FromUtc, DateTime ToUtc) window
+        (DateTime FromUtc, DateTime ToUtc) window,
+        ISet<Guid> touched
     )
     {
         var donghua = entries.Any(e => e.Donghua);
@@ -317,6 +676,7 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
                 continue;
             }
 
+            touched.Add(schedule.ID);
             WriteAiringsForSchedule(schedule, entries, window);
         }
     }
@@ -392,6 +752,38 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
     }
 
     /// <summary>
+    /// Names as removals the airings of a schedule, inside the fortnight the
+    /// timetables cover, now that the timetables no longer list its anime on
+    /// that air type and platform at all.
+    /// </summary>
+    /// <param name="schedule">The schedule.</param>
+    /// <param name="window">The stretch of time the timetables cover, in UTC.</param>
+    /// <returns><c>true</c> when anything was withdrawn.</returns>
+    private bool WithdrawUnlisted(IAiringSchedule schedule, (DateTime FromUtc, DateTime ToUtc) window)
+    {
+        var withdrawn = FindWithdrawnAirings(schedule, [], window);
+        if (withdrawn.Count == 0)
+            return false;
+
+        try
+        {
+            _scheduleService.MergeAirings(this, schedule, [], withdrawn, new EpisodeAiringUpdateOptions { InferDelays = false });
+            return true;
+        }
+        catch (AiringScheduleValidationException ex)
+        {
+            // Such as a write that would empty the schedule's retention window.
+            _logger.LogDebug(ex, "Could not withdraw the unlisted AnimeSchedule.net airings of schedule {ScheduleID}.", schedule.ID);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to withdraw the unlisted AnimeSchedule.net airings of schedule {ScheduleID}.", schedule.ID);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The airings already on the schedule, inside the fortnight the
     /// timetables cover, that those timetables no longer list. An episode
     /// AnimeSchedule.net has dropped from a week it still publishes reaches
@@ -415,38 +807,194 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             .ToList();
     }
 
-    #endregion
-
-    #region Caching
-
-    private async Task<AnimeScheduleAnimeInfo?> ResolveAnimeInfoAsync(int anidbAnimeId, CancellationToken cancellationToken)
+    /// <summary>
+    /// This provider's schedules, by the series they are for. Read from the
+    /// server, with no requests to AnimeSchedule.net.
+    /// </summary>
+    /// <returns>The schedules, by series ID.</returns>
+    private Dictionary<MetadataGuid, IReadOnlyList<IAiringSchedule>> GetOwnSchedules()
     {
-        if (_animeCache.TryGetValue(anidbAnimeId, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
-            return cached.Info;
+        Guid providerID;
+        try
+        {
+            providerID = _scheduleService.GetProviderInfo(this).ID;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _logger.LogDebug(ex, "Could not read this provider's AnimeSchedule.net schedules.");
+            return [];
+        }
 
-        var info = await _apiClient.FindAnimeByAnidbIdAsync(anidbAnimeId, cancellationToken).ConfigureAwait(false);
-        var expiresAt = DateTimeOffset.UtcNow.Add(info is null ? AnimeInfoNegativeTtl : AnimeInfoTtl);
-        _animeCache[anidbAnimeId] = (info, expiresAt);
-        return info;
+        return _scheduleService.GetSchedulesForProvider(providerID)
+            .GroupBy(schedule => schedule.SeriesID)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<IAiringSchedule>)[.. group]);
     }
 
-    private async Task<IReadOnlyList<AnimeScheduleTimetableEntry>> GetTimetableCachedAsync(AnimeScheduleAirType airType, int year, int week, CancellationToken cancellationToken)
+    #endregion
+
+    #region Timetables
+
+    /// <summary>
+    /// This week's and next week's timetable entries for each air type, with
+    /// one request per air type and week at most every five minutes.
+    /// </summary>
+    /// <param name="now">The current time, in UTC.</param>
+    /// <param name="cancellationToken">Cancels the requests.</param>
+    /// <returns>The entries per air type, <c>null</c> where either week failed.</returns>
+    /// <exception cref="AnimeScheduleUnavailableException">AnimeSchedule.net is suspended.</exception>
+    private async Task<Dictionary<AnimeScheduleAirType, IReadOnlyList<AnimeScheduleTimetableEntry>?>> LoadTimetablesAsync(
+        DateTime now,
+        CancellationToken cancellationToken
+    )
+    {
+        var (year, week) = AnimeScheduleMapper.GetIsoWeek(now);
+        var (nextYear, nextWeek) = AnimeScheduleMapper.GetIsoWeek(now.AddDays(7));
+        var timetables = new Dictionary<AnimeScheduleAirType, IReadOnlyList<AnimeScheduleTimetableEntry>?>();
+        foreach (var airType in AnimeScheduleMapper.AllAirTypes)
+        {
+            var current = await GetTimetableCachedAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
+            var next = await GetTimetableCachedAsync(airType, nextYear, nextWeek, cancellationToken).ConfigureAwait(false);
+            timetables[airType] = current is null || next is null ? null : [.. current, .. next];
+        }
+
+        return timetables;
+    }
+
+    /// <summary>
+    /// One week's timetable for one air type, from the cache while it is
+    /// fresh. A failed request is not cached.
+    /// </summary>
+    /// <param name="airType">The air type.</param>
+    /// <param name="year">The ISO 8601 year.</param>
+    /// <param name="week">The ISO 8601 week.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The entries, or <c>null</c> when the request failed.</returns>
+    /// <exception cref="AnimeScheduleUnavailableException">AnimeSchedule.net is suspended.</exception>
+    private async Task<IReadOnlyList<AnimeScheduleTimetableEntry>?> GetTimetableCachedAsync(
+        AnimeScheduleAirType airType,
+        int year,
+        int week,
+        CancellationToken cancellationToken
+    )
     {
         var key = (airType, year, week);
         if (_timetableCache.TryGetValue(key, out var cached) && cached.ExpiresAt > DateTimeOffset.UtcNow)
             return cached.Entries;
 
         var entries = await _apiClient.GetTimetableAsync(airType, year, week, cancellationToken).ConfigureAwait(false);
-        _timetableCache[key] = (entries, DateTimeOffset.UtcNow.Add(TimetableTtl));
+        if (entries is not null)
+            _timetableCache[key] = (entries, DateTimeOffset.UtcNow.Add(TimetableTtl));
         return entries;
     }
 
+    /// <summary>
+    /// The AniDB anime behind a series.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    /// <returns>The AniDB anime, or <c>null</c>.</returns>
     private static IAnidbAnime? ResolveAnidbAnime(ISeries series) => series switch
     {
         IAnidbAnime anidbAnime => anidbAnime,
         IShokoSeries shokoSeries => shokoSeries.AnidbAnime,
         _ => null,
     };
+
+    #endregion
+
+    #region Types
+
+    /// <summary>
+    /// How one series is matched, and what is still to learn about it.
+    /// </summary>
+    /// <param name="series">The series.</param>
+    private sealed class SeriesPlan(ISeries series)
+    {
+        /// <summary>
+        /// The series.
+        /// </summary>
+        public ISeries Series { get; } = series;
+
+        /// <summary>
+        /// The AniDB anime behind the series, or <c>null</c>.
+        /// </summary>
+        public IAnidbAnime? AnidbAnime { get; set; }
+
+        /// <summary>
+        /// The AniDB anime ID, or <c>0</c> without one.
+        /// </summary>
+        public int AnidbID { get; set; }
+
+        /// <summary>
+        /// The fingerprint of the anime's AniDB data.
+        /// </summary>
+        public string Fingerprint { get; set; } = "";
+
+        /// <summary>
+        /// The anime's catalog entry, when it has one.
+        /// </summary>
+        public CatalogEntry? Entry { get; set; }
+
+        /// <summary>
+        /// The anime's route on AnimeSchedule.net, when it is known.
+        /// </summary>
+        public string? Route { get; set; }
+
+        /// <summary>
+        /// The anime's lookup state, or <c>null</c> when it has none.
+        /// </summary>
+        public AnidbLookup? Lookup { get; set; }
+
+        /// <summary>
+        /// Whether <see cref="Lookup"/> changed and needs storing.
+        /// </summary>
+        public bool LookupChanged { get; set; }
+
+        /// <summary>
+        /// Whether the anime is to be looked up.
+        /// </summary>
+        public bool NeedsLookup { get; set; }
+    }
+
+    /// <summary>
+    /// What one chunk of a sweep did, for its summary.
+    /// </summary>
+    private sealed class SweepStats
+    {
+        /// <summary>
+        /// How many anime the catalog holds.
+        /// </summary>
+        public int CatalogSize { get; set; }
+
+        /// <summary>
+        /// How many series were matched to a route.
+        /// </summary>
+        public int Matched { get; set; }
+
+        /// <summary>
+        /// How many lookup requests were made.
+        /// </summary>
+        public int Lookups { get; set; }
+
+        /// <summary>
+        /// How many anime were looked up.
+        /// </summary>
+        public int LookedUp { get; set; }
+
+        /// <summary>
+        /// How many looked-up anime AnimeSchedule.net did not know.
+        /// </summary>
+        public int Misses { get; set; }
+
+        /// <summary>
+        /// How many anime were given up after a miss.
+        /// </summary>
+        public int GivenUp { get; set; }
+
+        /// <summary>
+        /// How many series had anything written.
+        /// </summary>
+        public int Written { get; set; }
+    }
 
     #endregion
 }

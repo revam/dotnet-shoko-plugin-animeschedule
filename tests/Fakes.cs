@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using NJsonSchema;
 using Shoko.Abstractions.Config;
@@ -9,12 +11,16 @@ using Shoko.Abstractions.Config.Enums;
 using Shoko.Abstractions.Config.Events;
 using Shoko.Abstractions.Config.Services;
 using Shoko.Abstractions.Metadata;
+using Shoko.Abstractions.Metadata.Airing;
 using Shoko.Abstractions.Metadata.Anidb;
+using Shoko.Abstractions.Metadata.CrossReferences;
 using Shoko.Abstractions.Metadata.Services;
 using Shoko.Abstractions.Metadata.Shoko;
+using Shoko.Abstractions.Metadata.Storage;
 using Shoko.Abstractions.Plugin;
 using Shoko.Abstractions.UI;
 using Shoko.Abstractions.User;
+using Shoko.Plugin.AnimeSchedule.Storage;
 
 // The host's interface declares events this fake has no reason to raise.
 #pragma warning disable CS0067
@@ -156,13 +162,13 @@ internal static class Fixture
 /// </summary>
 internal sealed class StubHttpMessageHandler : System.Net.Http.HttpMessageHandler
 {
-    private readonly Queue<(System.Net.HttpStatusCode StatusCode, string Body, string ContentType)> _responses = new();
+    private readonly Queue<(System.Net.HttpStatusCode StatusCode, string Body, string ContentType, TimeSpan? RetryAfter)> _responses = new();
 
     public List<string> Requests { get; } = [];
 
-    public StubHttpMessageHandler Enqueue(System.Net.HttpStatusCode statusCode, string body, string contentType = "application/json")
+    public StubHttpMessageHandler Enqueue(System.Net.HttpStatusCode statusCode, string body, string contentType = "application/json", TimeSpan? retryAfter = null)
     {
-        _responses.Enqueue((statusCode, body, contentType));
+        _responses.Enqueue((statusCode, body, contentType, retryAfter));
         return this;
     }
 
@@ -172,10 +178,13 @@ internal sealed class StubHttpMessageHandler : System.Net.Http.HttpMessageHandle
         if (!_responses.TryDequeue(out var response))
             throw new InvalidOperationException($"No stubbed response left for {request.RequestUri}.");
 
-        return System.Threading.Tasks.Task.FromResult(new System.Net.Http.HttpResponseMessage(response.StatusCode)
+        var message = new System.Net.Http.HttpResponseMessage(response.StatusCode)
         {
             Content = new System.Net.Http.StringContent(response.Body, System.Text.Encoding.UTF8, response.ContentType),
-        });
+        };
+        if (response.RetryAfter is { } retryAfter)
+            message.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(retryAfter);
+        return System.Threading.Tasks.Task.FromResult(message);
     }
 }
 
@@ -236,6 +245,18 @@ internal class StubProxy<T> : System.Reflection.DispatchProxy where T : class
 internal static class Host
 {
     /// <summary>
+    /// The AniList source, registered the way the AniList plugin registers it.
+    /// </summary>
+    public static MetadataSource Anilist { get; } = RegisterAnilist();
+
+    /// <summary>
+    /// Registers the AniList source once for the whole test run.
+    /// </summary>
+    /// <returns>The source.</returns>
+    private static MetadataSource RegisterAnilist()
+        => MetadataSource.TryGet("anilist", out var source) ? source : MetadataSource.Register("AniList", "anilist");
+
+    /// <summary>
     /// A metadata service holding the given shoko series.
     /// </summary>
     /// <param name="series">The series the sweep walks.</param>
@@ -244,30 +265,193 @@ internal static class Host
         => Stub.Of<IMetadataService>(("GetAllShokoSeries", _ => series));
 
     /// <summary>
-    /// A shoko series backed by an AniDB anime of the same ID, which is all
-    /// the sweep reads before asking AnimeSchedule.net about it.
+    /// A shoko series backed by an AniDB anime of the same ID.
+    /// </summary>
+    /// <param name="seriesId">The shoko series ID, and the AniDB anime ID.</param>
+    /// <param name="airDate">The AniDB start date, or <c>null</c>.</param>
+    /// <param name="endDate">The AniDB end date, or <c>null</c>.</param>
+    /// <param name="malIds">AniDB's own MyAnimeList links.</param>
+    /// <param name="episodes">The AniDB episode count.</param>
+    /// <returns>The series.</returns>
+    public static IShokoSeries ShokoSeries(int seriesId, PartialDateOnly? airDate = null, PartialDateOnly? endDate = null, IReadOnlyList<int>? malIds = null, int episodes = 12)
+    {
+        var anidbAnime = Stub.Of<IAnidbAnime>(
+            ("ID", _ => new MetadataGuid(MetadataSource.AniDB, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture))),
+            ("AirDate", _ => airDate),
+            ("EndDate", _ => endDate),
+            ("EpisodeCounts", _ => new EpisodeCounts { Episodes = episodes }),
+            ("MalIDs", _ => malIds ?? [])
+        );
+        return Stub.Of<IShokoSeries>(
+            ("ID", _ => ShokoSeriesID(seriesId)),
+            ("LocalID", _ => seriesId),
+            ("AnidbAnime", _ => anidbAnime)
+        );
+    }
+
+    /// <summary>
+    /// The metadata ID of a shoko series.
     /// </summary>
     /// <param name="seriesId">The shoko series ID.</param>
-    /// <returns>The series.</returns>
-    public static IShokoSeries ShokoSeries(int seriesId)
-        => Stub.Of<IShokoSeries>(
-            ("ID", _ => new MetadataGuid(MetadataSource.Shoko, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture))),
-            ("LocalID", _ => seriesId),
-            ("AnidbAnime", _ => Stub.Of<IAnidbAnime>(("ID", _ => new MetadataGuid(MetadataSource.AniDB, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture)))))
-        );
+    /// <returns>The ID.</returns>
+    public static MetadataGuid ShokoSeriesID(int seriesId)
+        => new(MetadataSource.Shoko, MetadataEntityType.Series, seriesId.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// A cross-reference store linking AniDB anime to AniList entries, each
+    /// carrying the MyAnimeList ID AniList gives it.
+    /// </summary>
+    /// <param name="links">The AniList entry and its MyAnimeList ID, by AniDB anime ID.</param>
+    /// <returns>The store.</returns>
+    public static IMetadataCrossReferenceStore CrossReferences(IReadOnlyDictionary<int, (int AnilistID, int? MalID)>? links = null)
+    {
+        // Registered before the provider first asks for the source.
+        var anilist = Anilist;
+        return Stub.Of<IMetadataCrossReferenceStore>(("GetSeriesLinks", args =>
+        {
+            var anidbAnimeId = (int)args[0]!;
+            if (links is null || !links.TryGetValue(anidbAnimeId, out var link) || args[1] is not MetadataSource source || source != anilist)
+                return (IReadOnlyList<IMetadataSeriesCrossReference>)[];
+
+            var malIds = link.MalID is { } malId
+                ? (IReadOnlyList<MetadataGuid>)[new MetadataGuid(MetadataSource.Parse("mal"), MetadataEntityType.Series, malId.ToString(CultureInfo.InvariantCulture))]
+                : [];
+            var anilistSeries = Stub.Of<ISeries>(("CrossSourceIDs", _ => malIds));
+            return (IReadOnlyList<IMetadataSeriesCrossReference>)
+            [
+                Stub.Of<IMetadataSeriesCrossReference>(
+                    ("ProviderID", _ => new MetadataGuid(anilist, MetadataEntityType.Series, link.AnilistID.ToString(CultureInfo.InvariantCulture))),
+                    ("Ordering", _ => 0),
+                    ("Provider", _ => anilistSeries)
+                ),
+            ];
+        }));
+    }
 }
 
 /// <summary>
-/// An <see cref="System.Net.Http.HttpMessageHandler"/> answering
-/// AnimeSchedule.net's timetables with an empty week and every other request
-/// with a 404, recording each request, and able to abort one the way a
-/// sweep's deadline aborts the request in flight.
+/// The plugin's database in memory, migrated the way the server migrates it,
+/// for as long as the instance lives.
+/// </summary>
+internal sealed class TestDatabase : IDbContextFactory<AnimeScheduleDbContext>, IDisposable
+{
+    private readonly SqliteConnection _connection = new("Data Source=:memory:");
+
+    private readonly DbContextOptions<AnimeScheduleDbContext> _options;
+
+    public TestDatabase()
+    {
+        _connection.Open();
+        _options = new DbContextOptionsBuilder<AnimeScheduleDbContext>().UseSqlite(_connection).Options;
+        using var context = CreateDbContext();
+        context.Database.Migrate();
+    }
+
+    public AnimeScheduleDbContext CreateDbContext()
+        => new(_options);
+
+    public void Dispose()
+        => _connection.Dispose();
+}
+
+/// <summary>
+/// The airing schedule service a sweep writes to, recording each write. It
+/// holds a fixed set of this provider's schedules and their airings.
+/// </summary>
+internal sealed class FakeScheduleService
+{
+    private readonly Guid _providerID = Guid.NewGuid();
+
+    /// <summary>
+    /// The schedules the provider holds, with their airings.
+    /// </summary>
+    public Dictionary<IAiringSchedule, IReadOnlyList<IEpisodeAiring>> Schedules { get; } = [];
+
+    /// <summary>
+    /// The keys of the schedules written, in order.
+    /// </summary>
+    public List<string> WrittenScheduleKeys { get; } = [];
+
+    /// <summary>
+    /// The airings named as removals, in order.
+    /// </summary>
+    public List<IEpisodeAiring> Removals { get; } = [];
+
+    /// <summary>
+    /// The service.
+    /// </summary>
+    public IAiringScheduleService Service { get; }
+
+    public FakeScheduleService()
+    {
+        Service = Stub.Of<IAiringScheduleService>(
+            ("GetProviderInfo", args => new AiringScheduleProviderInfo
+            {
+                ID = _providerID,
+                Version = new Version(1, 0),
+                Name = "AnimeSchedule.net",
+                Description = "",
+                Provider = (IAiringScheduleProvider)args[0]!,
+                ConfigurationInfo = null,
+                PluginInfo = null!,
+                Priority = 0,
+                EnabledKinds = [],
+                SweepInterval = TimeSpan.FromMinutes(30),
+            }),
+            ("GetSchedulesForProvider", _ => (IReadOnlyList<IAiringSchedule>)[.. Schedules.Keys]),
+            ("GetAiringsForSchedule", args => Schedules.FirstOrDefault(pair => pair.Key.ID == (Guid)args[0]!).Value ?? []),
+            ("AddOrUpdateSchedule", args =>
+            {
+                var data = (AiringScheduleData)args[1]!;
+                WrittenScheduleKeys.Add(data.Key!);
+                return Schedules.Keys.FirstOrDefault(schedule => schedule.SeriesID == data.Series.ID && schedule.Key == data.Key)
+                    ?? Schedule(data.Series.ID, data.Key!);
+            }),
+            ("MergeAirings", args =>
+            {
+                Removals.AddRange((IEnumerable<IEpisodeAiring>?)args[3] ?? []);
+                return (IReadOnlyList<IEpisodeAiring>)[];
+            })
+        );
+    }
+
+    /// <summary>
+    /// A schedule of this provider.
+    /// </summary>
+    /// <param name="seriesId">The series it is for.</param>
+    /// <param name="key">The schedule key.</param>
+    /// <returns>The schedule.</returns>
+    public static IAiringSchedule Schedule(MetadataGuid seriesId, string key)
+    {
+        var id = Guid.NewGuid();
+        return Stub.Of<IAiringSchedule>(
+            ("ID", _ => id),
+            ("Key", _ => key),
+            ("SeriesID", _ => seriesId),
+            ("LastEpisodeNumber", _ => null)
+        );
+    }
+
+    /// <summary>
+    /// An airing at the given time.
+    /// </summary>
+    /// <param name="airedAt">When it airs, in UTC.</param>
+    /// <param name="key">Its key.</param>
+    /// <returns>The airing.</returns>
+    public static IEpisodeAiring Airing(DateTime airedAt, string key)
+        => Stub.Of<IEpisodeAiring>(("AiredAt", _ => airedAt), ("Key", _ => key));
+}
+
+/// <summary>
+/// A stand-in for AnimeSchedule.net, answering the airing lists, the AniDB
+/// lookups and the timetables from what a test sets up, recording each
+/// request, and able to abort one the way a sweep's deadline does.
 /// </summary>
 /// <param name="abortWhen">
 /// Optional. Called with each request URI and everything requested so far;
 /// answering <c>true</c> aborts that request.
 /// </param>
-internal sealed class StubAnimeScheduleHandler(Func<string, IReadOnlyList<string>, bool>? abortWhen = null) : System.Net.Http.HttpMessageHandler
+internal sealed class FakeAnimeScheduleApi(Func<string, IReadOnlyList<string>, bool>? abortWhen = null) : System.Net.Http.HttpMessageHandler
 {
     private readonly List<string> _requests = [];
 
@@ -275,6 +459,79 @@ internal sealed class StubAnimeScheduleHandler(Func<string, IReadOnlyList<string
     /// Every request URI, in order.
     /// </summary>
     public IReadOnlyList<string> Requests => _requests;
+
+    /// <summary>
+    /// The anime of each airing list, by status.
+    /// </summary>
+    public Dictionary<string, List<object>> Lists { get; } = new(StringComparer.Ordinal)
+    {
+        ["ongoing"] = [],
+        ["upcoming"] = [],
+    };
+
+    /// <summary>
+    /// The anime a lookup by AniDB ID finds.
+    /// </summary>
+    public List<object> Known { get; } = [];
+
+    /// <summary>
+    /// The entries of each air type's timetable, by its path segment; every
+    /// week answers the same.
+    /// </summary>
+    public Dictionary<string, List<object>> Timetables { get; } = new(StringComparer.Ordinal)
+    {
+        ["raw"] = [],
+        ["sub"] = [],
+        ["dub"] = [],
+    };
+
+    /// <summary>
+    /// Answers every request this status instead, when set.
+    /// </summary>
+    public System.Net.HttpStatusCode? FailWith { get; set; }
+
+    /// <summary>
+    /// Answers the timetables this status instead, when set.
+    /// </summary>
+    public System.Net.HttpStatusCode? FailTimetablesWith { get; set; }
+
+    /// <summary>
+    /// The requests that were lookups by AniDB ID.
+    /// </summary>
+    public IReadOnlyList<string> Lookups => [.. _requests.Where(uri => uri.Contains("anidb-ids=", StringComparison.Ordinal))];
+
+    /// <summary>
+    /// An anime as the API returns it, with links to the given IDs.
+    /// </summary>
+    /// <param name="route">The route.</param>
+    /// <param name="anidbId">The AniDB anime ID, or <c>null</c>.</param>
+    /// <param name="anilistId">The AniList anime ID, or <c>null</c>.</param>
+    /// <param name="malId">The MyAnimeList anime ID, or <c>null</c>.</param>
+    /// <returns>The anime.</returns>
+    public static object Anime(string route, int? anidbId = null, int? anilistId = null, int? malId = null)
+        => new
+        {
+            route,
+            title = route,
+            status = "Ongoing",
+            episodes = 12,
+            websites = new
+            {
+                anidb = anidbId is { } anidb ? $"anidb.net/anime/{anidb}" : "",
+                aniList = anilistId is { } anilist ? $"anilist.co/anime/{anilist}/{route}" : "",
+                mal = malId is { } mal ? $"myanimelist.net/anime/{mal}/{route}" : "",
+            },
+        };
+
+    /// <summary>
+    /// A timetable entry of the given route, airing at the given time.
+    /// </summary>
+    /// <param name="route">The route.</param>
+    /// <param name="airsAt">When the episode airs.</param>
+    /// <param name="episode">The episode number.</param>
+    /// <returns>The entry.</returns>
+    public static object Entry(string route, DateTime airsAt, int episode = 1)
+        => new { route, title = route, episodeDate = airsAt, episodeNumber = episode, airingStatus = "unaired" };
 
     /// <inheritdoc/>
     /// <exception cref="OperationCanceledException">The request was aborted.</exception>
@@ -286,12 +543,52 @@ internal sealed class StubAnimeScheduleHandler(Func<string, IReadOnlyList<string
         if (abortWhen is not null && abortWhen(uri, _requests))
             throw new OperationCanceledException(cancellationToken);
 
-        return Task.FromResult(uri.Contains("/timetables/", StringComparison.Ordinal)
-            ? new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
-            {
-                RequestMessage = request,
-                Content = new System.Net.Http.StringContent("[]", System.Text.Encoding.UTF8, "application/json"),
-            }
-            : new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.NotFound) { RequestMessage = request });
+        if (FailWith is { } failWith)
+            return Answer(failWith, "");
+
+        var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query);
+        if (uri.Contains("/timetables/", StringComparison.Ordinal))
+        {
+            if (FailTimetablesWith is { } failTimetablesWith)
+                return Answer(failTimetablesWith, "");
+
+            var segment = request.RequestUri.Segments[^1];
+            return Answer(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.Serialize(Timetables[segment]));
+        }
+
+        List<object> anime;
+        if (query.GetValues("anidb-ids") is { } ids)
+        {
+            var wanted = ids.ToHashSet(StringComparer.Ordinal);
+            anime = [.. Known.Where(entry => wanted.Contains(System.Text.Json.JsonSerializer.SerializeToElement(entry).GetProperty("websites").GetProperty("anidb").GetString()!.Split('/')[^1]))];
+        }
+        else
+        {
+            anime = Lists[query["airing-statuses"]!];
+        }
+
+        if (anime.Count == 0)
+            return Answer(System.Net.HttpStatusCode.NotFound, "Couldn't find anime with these parameters.");
+
+        return Answer(System.Net.HttpStatusCode.OK, System.Text.Json.JsonSerializer.Serialize(new { page = 1, totalAmount = anime.Count, anime }));
+    }
+
+    /// <summary>
+    /// A response with the given status and body.
+    /// </summary>
+    /// <param name="statusCode">The status.</param>
+    /// <param name="body">The body.</param>
+    /// <returns>The response.</returns>
+    private static Task<System.Net.Http.HttpResponseMessage> Answer(System.Net.HttpStatusCode statusCode, string body)
+    {
+        var message = new System.Net.Http.HttpResponseMessage(statusCode)
+        {
+            Content = new System.Net.Http.StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+        };
+
+        // A rate limit that asks for no wait, so the retry is not slept on.
+        if (statusCode == System.Net.HttpStatusCode.TooManyRequests)
+            message.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
+        return Task.FromResult(message);
     }
 }

@@ -83,6 +83,35 @@ public sealed class AnimeScheduleAnimeInfo
     /// <c>Finished</c>.
     /// </summary>
     public string Status { get; set; } = "";
+
+    /// <summary>
+    /// The anime's pages on other sites, or <c>null</c> when the response
+    /// lists none.
+    /// </summary>
+    public AnimeScheduleWebsites? Websites { get; set; }
+}
+
+/// <summary>
+/// The <c>websites</c> object of an AnimeSchedule.net anime: links to the
+/// anime on other sites, sent without a scheme (<c>anidb.net/anime/69</c>).
+/// Any of them may be missing or empty.
+/// </summary>
+public sealed class AnimeScheduleWebsites
+{
+    /// <summary>
+    /// The anime's AniDB page.
+    /// </summary>
+    public string? Anidb { get; set; }
+
+    /// <summary>
+    /// The anime's AniList page.
+    /// </summary>
+    public string? AniList { get; set; }
+
+    /// <summary>
+    /// The anime's MyAnimeList page.
+    /// </summary>
+    public string? Mal { get; set; }
 }
 
 /// <summary>
