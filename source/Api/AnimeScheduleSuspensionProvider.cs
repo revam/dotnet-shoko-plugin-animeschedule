@@ -11,9 +11,8 @@ namespace Shoko.Plugin.AnimeSchedule.Api;
 /// rate or answers with server errors. The rate limiter reports through it.
 /// </summary>
 /// <remarks>
-/// The server holds back only provider jobs of metadata and release
-/// providers, and an airing sweep is neither, so the plugin also checks the
-/// suspension itself before it sweeps or refreshes.
+/// The server holds the provider's sweep and refresh jobs while it is
+/// suspended. A suspension starting mid-run stops that run at its next request.
 /// </remarks>
 public sealed class AnimeScheduleSuspensionProvider : ISuspensionProvider
 {

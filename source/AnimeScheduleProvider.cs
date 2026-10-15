@@ -133,12 +133,6 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
             return false;
         }
 
-        if (_apiClient.SuspendedUntil is { } suspendedUntil)
-        {
-            _logger.LogDebug("Skipping AnimeSchedule.net refresh for AniDB anime {AnimeID}: suspended until {ResumesAt:u}.", anidbAnimeId, suspendedUntil);
-            return false;
-        }
-
         var now = DateTime.UtcNow;
         var stats = new SweepStats();
         try
@@ -186,12 +180,6 @@ public sealed class AnimeScheduleProvider : IAiringScheduleProvider<Configuratio
         if (string.IsNullOrWhiteSpace(_configurationProvider.Load().AppToken))
         {
             _logger.LogDebug("Skipping the AnimeSchedule.net sweep: no app token configured.");
-            return null;
-        }
-
-        if (_apiClient.SuspendedUntil is { } suspendedUntil)
-        {
-            _logger.LogDebug("Skipping the AnimeSchedule.net sweep: suspended until {ResumesAt:u}.", suspendedUntil);
             return null;
         }
 
