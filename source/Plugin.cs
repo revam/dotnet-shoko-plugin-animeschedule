@@ -14,7 +14,7 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// AnimeSchedule.net's API terms of use require visible credit to
 /// AnimeSchedule.net wherever data from it is shown; see the README.
 /// </remarks>
-public class Plugin : IPlugin, IPluginServiceRegistration
+public class Plugin : IPlugin<Configuration>, IPluginServiceRegistration
 {
     /// <summary>
     /// The embedded resource of the plugin's thumbnail.

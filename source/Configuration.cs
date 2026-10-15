@@ -15,7 +15,7 @@ namespace Shoko.Plugin.AnimeSchedule;
 /// here.
 /// </remarks>
 [Display(Name = "AnimeSchedule.net")]
-public class Configuration : IAiringScheduleProviderConfiguration, INewtonsoftJsonConfiguration
+public class Configuration : IAiringScheduleProviderConfiguration, INewtonsoftJsonConfiguration, IPluginConfiguration
 {
     /// <summary>
     /// Your own AnimeSchedule.net application token, used as a Bearer token
