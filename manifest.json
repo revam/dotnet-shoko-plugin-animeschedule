@@ -14,9 +14,23 @@
     "calendar",
     "streaming"
   ],
-  "thumbnail_url": "https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/stable/source/Assets/thumbnail.svg",
-  "icon_url": "https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/stable/source/Assets/icon.svg",
   "releases": [
+    {
+      "version": "1.2.0",
+      "tag": "v1.2.0",
+      "released_at": "2026-10-15T09:40:28.8266484Z",
+      "channel": "Stable",
+      "release_notes": "Sweeps now start from AnimeSchedule.net\u0027s list of airing anime and only look up anime that can be airing, batched, with growing waits for anime it doesn\u0027t know, kept in a database of the plugin\u0027s own. A rate limit or a run of server errors pauses the plugin\u0027s requests until AnimeSchedule.net is ready again. Its settings are now the plugin\u0027s own settings.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.107\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule/releases/download/v1.2.0/AnimeSchedule.net-v1.2.0-any.zip",
+          "checksum": "sha256:e2b31ed489e5205aa0d67277ed0a246a6c5ccc3044451d2aafde6a0eeb40ce38"
+        }
+      ]
+    },
     {
       "version": "1.1.2",
       "tag": "v1.1.2",
@@ -113,5 +127,7 @@
         }
       ]
     }
-  ]
+  ],
+  "thumbnail_url": "https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/stable/source/Assets/thumbnail.svg",
+  "icon_url": "https://raw.githubusercontent.com/revam/dotnet-shoko-plugin-animeschedule/stable/source/Assets/icon.svg"
 }
