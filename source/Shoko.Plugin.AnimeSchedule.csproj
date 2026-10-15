@@ -20,6 +20,14 @@
     -->
     <ItemGroup>
         <PackageReference Include="Shoko.Abstractions" Version="6.0.0-alpha.106" ExcludeAssets="runtime" />
+        <!-- The server already loads Entity Framework Core and SQLite and
+             configures the plugin's database, so they are referenced for
+             compiling only. The version is the server's. -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" ExcludeAssets="runtime;native" PrivateAssets="All" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Shoko.Plugin.AnimeSchedule.Tests" />
     </ItemGroup>
 
     <ItemGroup>
