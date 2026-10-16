@@ -16,6 +16,22 @@
   ],
   "releases": [
     {
+      "version": "1.2.1",
+      "tag": "v1.2.1",
+      "released_at": "2026-10-16T07:17:52.3033479Z",
+      "channel": "Stable",
+      "release_notes": "Rebuilt against the abstractions \u00606.0.0-alpha.108\u0060 release.\n\nRequires Shoko Server with abstractions \u00606.0.0-alpha.108\u0060.",
+      "dependencies": [],
+      "archives": [
+        {
+          "runtime": "any",
+          "abstraction": "6.0.0",
+          "url": "https://github.com/revam/dotnet-shoko-plugin-animeschedule/releases/download/v1.2.1/AnimeSchedule.net-v1.2.1-any.zip",
+          "checksum": "sha256:a65080b8948a1e22376e17e0d94f46be8d235075d2bcbe4e2089d18dbd4312c6"
+        }
+      ]
+    },
+    {
       "version": "1.2.0",
       "tag": "v1.2.0",
       "released_at": "2026-10-15T09:40:28.8266484Z",
